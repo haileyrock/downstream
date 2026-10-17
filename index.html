@@ -1,0 +1,1427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Downstream — A Boston Story Told from the Water</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* Era palette — overwritten every frame by JS as the boat moves downstream */
+    --sky-top: #9fb4c8;
+    --sky-bot: #f2d6bf;
+    --sun: #ffe3b3;
+    --sun-y: 60%;
+    --land: #5d6b72;
+    --land2: #7d8a8f;
+    --ink: #24323a;
+    --mist: 0.35;
+    --stars: 0;
+    --water-h: 42vh;
+
+    --paper: rgba(251, 247, 240, 0.9);
+    --paper-ink: #1f2a30;
+    --accent: #b5532f;
+    --serif: "Fraunces", Georgia, "Times New Roman", serif;
+    --sans: "Inter", system-ui, -apple-system, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #2f4f60; }
+  body { font-family: var(--sans); color: var(--paper-ink); }
+
+  /* ---------- Fixed scene layers ---------- */
+  .layer { position: fixed; inset: 0; pointer-events: none; }
+  #sky { background: linear-gradient(to bottom, var(--sky-top), var(--sky-bot) calc(100% - var(--water-h))); z-index: 0; }
+  #sky::after { /* stars, faded in for night eras */
+    content: ""; position: absolute; inset: 0 0 var(--water-h) 0; opacity: var(--stars);
+    background-image:
+      radial-gradient(1.2px 1.2px at 12% 18%, #fff 50%, transparent 51%),
+      radial-gradient(1px 1px at 27% 8%, #fff 50%, transparent 51%),
+      radial-gradient(1.4px 1.4px at 41% 26%, #fff 50%, transparent 51%),
+      radial-gradient(1px 1px at 58% 12%, #fff 50%, transparent 51%),
+      radial-gradient(1.2px 1.2px at 66% 31%, #fff 50%, transparent 51%),
+      radial-gradient(1px 1px at 83% 9%, #fff 50%, transparent 51%),
+      radial-gradient(1.3px 1.3px at 91% 22%, #fff 50%, transparent 51%),
+      radial-gradient(1px 1px at 6% 38%, #fff 50%, transparent 51%),
+      radial-gradient(1px 1px at 35% 41%, #fff 50%, transparent 51%),
+      radial-gradient(1px 1px at 77% 44%, #fff 50%, transparent 51%);
+  }
+  #sun {
+    position: fixed; z-index: 1; pointer-events: none;
+    width: 9vmin; height: 9vmin; border-radius: 50%;
+    left: 72vw; top: calc((100vh - var(--water-h)) * var(--sun-frac, 0.6));
+    background: var(--sun);
+    box-shadow: 0 0 6vmin 2vmin color-mix(in srgb, var(--sun) 55%, transparent),
+                0 0 22vmin 8vmin color-mix(in srgb, var(--sun) 22%, transparent);
+    transform: translate(-50%, -50%);
+  }
+  .scene {
+    position: fixed; z-index: 2; pointer-events: none;
+    left: -10vw; width: 120vw; height: 34vh;
+    bottom: calc(var(--water-h) - 10px);
+    opacity: 0; will-change: transform, opacity;
+  }
+  .scene svg { width: 100%; height: 100%; display: block; }
+  .scene.pan { left: 0; width: auto; aspect-ratio: 3000 / 260; }
+  .land  { fill: var(--land); }
+  .land2 { fill: var(--land2); }
+  .grow  { transform-box: fill-box; transform-origin: 50% 100%; }
+  #mist {
+    z-index: 3; opacity: var(--mist);
+    background: linear-gradient(to bottom, transparent 30%, rgba(255,255,255,0.85) calc(100% - var(--water-h)), transparent calc(100% - var(--water-h) + 8vh));
+  }
+  canvas.water { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
+  #waterBack { z-index: 4; }
+  #boat {
+    position: fixed; left: 0; top: 0; z-index: 5; pointer-events: none;
+    width: min(250px, 46vw); transform-origin: 50% 80%; will-change: transform;
+  }
+  #boat svg { width: 100%; height: auto; display: block; overflow: visible; }
+  #waterFront { z-index: 6; }
+
+  /* ---------- Narration ---------- */
+  .seg {
+    position: fixed; z-index: 10; opacity: 0; visibility: hidden;
+    will-change: opacity, transform;
+  }
+  .seg.titlecard, .seg.transit, .seg.intro, .seg.outro {
+    left: 50%; top: 13vh; width: min(46rem, calc(100vw - 32px));
+    transform: translateX(-50%); text-align: center; color: var(--ink);
+  }
+  .seg.beat, .seg.placeholder {
+    right: 6vw; top: 12vh; width: min(31rem, calc(100vw - 32px));
+  }
+  .card {
+    background: var(--paper); color: var(--paper-ink);
+    border-radius: 14px; padding: 1.4rem 1.6rem 1.5rem;
+    box-shadow: 0 10px 40px rgba(10, 20, 30, 0.18), 0 1px 0 rgba(255,255,255,0.6) inset;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  .kicker {
+    font: 600 0.72rem/1 var(--sans); letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 0.8rem;
+  }
+  .card p { font: 400 1.12rem/1.62 var(--serif); margin: 0; }
+  .card p + p { margin-top: 0.8rem; }
+  .card .speaker { font: italic 400 0.95rem/1.4 var(--serif); color: #5a6870; margin-top: 1rem; }
+  .card.ph { border: 1.5px dashed rgba(31,42,48,0.35); background: rgba(251,247,240,0.78); }
+  .card.ph p { font-size: 1rem; }
+
+  .eyebrow { font: 600 0.78rem/1 var(--sans); letter-spacing: 0.22em; text-transform: uppercase; opacity: 0.8; margin: 0 0 1rem; }
+  .titlecard h2, .intro h1, .outro h2 {
+    font: 600 clamp(2.2rem, 6vw, 4.4rem)/1.02 var(--serif); margin: 0 0 0.8rem;
+    font-variation-settings: "opsz" 144; letter-spacing: -0.01em;
+    text-shadow: 0 1px 24px color-mix(in srgb, var(--sky-bot) 70%, transparent);
+  }
+  .intro h1 { font-size: clamp(3rem, 10vw, 7rem); }
+  .titlecard .years { font: italic 400 1.35rem/1.3 var(--serif); margin: 0 0 1.2rem; }
+  .titlecard .guide, .intro p, .outro p { font: 400 1.05rem/1.55 var(--serif); margin: 0 auto; max-width: 34rem; }
+  .titlecard .guide b { font-weight: 600; }
+  .seg.transit { width: auto; max-width: calc(100vw - 32px); color: #f6f1e6;
+    background: rgba(12, 18, 30, 0.42); border-radius: 22px; padding: 0.9rem 1.8rem 1rem;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .badge { width: 96px; margin: 1.1rem auto 0; filter: drop-shadow(0 6px 14px rgba(0,0,0,0.22)); }
+  .badge svg { width: 100%; height: auto; display: block; }
+  .chest { transform-box: fill-box; transform-origin: center; animation: chestDrop 2.2s ease-in infinite; }
+  @keyframes chestDrop {
+    0% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+    10% { opacity: 1; }
+    75% { transform: translate(12px, 22px) rotate(55deg); opacity: 1; }
+    100% { transform: translate(14px, 26px) rotate(65deg); opacity: 0; }
+  }
+  .beam { transform-box: view-box; transform-origin: 585px 150px; animation: sway 6s ease-in-out infinite alternate; }
+  .beam2 { animation-duration: 7.5s; animation-direction: alternate-reverse; }
+  @keyframes sway { from { transform: rotate(-14deg); } to { transform: rotate(14deg); } }
+  .outro .fineprint { margin-top: 1.4rem; font: 500 0.75rem/1.4 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.7; }
+  .transit p { font: italic 400 1.3rem/1.4 var(--serif); margin: 0; }
+  .transit .arrow { display: block; font: 600 0.72rem/1 var(--sans); letter-spacing: 0.25em; text-transform: uppercase; margin-top: 0.55rem; opacity: 0.8; }
+  .scrollhint { margin-top: 2.2rem !important; font: 600 0.75rem/1 var(--sans) !important; letter-spacing: 0.22em; text-transform: uppercase; opacity: 0.75; animation: bob 2.4s ease-in-out infinite; }
+  @keyframes bob { 50% { transform: translateY(6px); } }
+
+  /* ---------- River map nav ---------- */
+  #nav {
+    position: fixed; z-index: 20; top: 14px; left: 16px; right: 16px;
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    pointer-events: none; color: var(--ink);
+  }
+  #nav .brand { font: 600 1rem/1 var(--serif); letter-spacing: 0.02em; pointer-events: auto; }
+  #rivermap { position: relative; width: min(340px, 60vw); height: 28px; pointer-events: auto; }
+  #rivermap .line { position: absolute; left: 0; right: 0; top: 13px; height: 2px; background: currentColor; opacity: 0.35; border-radius: 2px; }
+  #rivermap .progress { position: absolute; left: 0; top: 13px; height: 2px; background: currentColor; border-radius: 2px; width: 0; }
+  #rivermap button {
+    position: absolute; top: 7px; width: 14px; height: 14px; margin-left: -7px; padding: 0;
+    border-radius: 50%; border: 2px solid currentColor; background: transparent; cursor: pointer; color: inherit;
+  }
+  #rivermap button.on { background: currentColor; }
+  #rivermap button span {
+    position: absolute; top: 18px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+    font: 500 0.62rem/1 var(--sans); letter-spacing: 0.06em; opacity: 0; transition: opacity .2s;
+  }
+  #rivermap button:hover span, #rivermap button:focus-visible span, #rivermap button.on span { opacity: 0.85; }
+
+  #spacer { position: relative; z-index: -1; }
+
+  @media (max-width: 720px) {
+    .seg.beat, .seg.placeholder { right: 16px; top: 9vh; }
+    .card { padding: 1.1rem 1.2rem 1.2rem; }
+    .card p { font-size: 1.02rem; }
+    #nav .brand { display: none; }
+    #rivermap { width: 100%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scrollhint, .chest, .beam { animation: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ======================= SCENE ======================= -->
+<div id="sky" class="layer" aria-hidden="true"></div>
+<div id="sun" aria-hidden="true"></div>
+
+<!-- Stop 1 scenery: the Shawmut peninsula, which shrinks its hills and grows its shoreline as you scroll -->
+<div class="scene" data-stop="0" aria-hidden="true">
+  <svg viewBox="0 0 1600 260" preserveAspectRatio="xMidYMax slice">
+    <!-- mainland far left + Boston Neck -->
+    <path class="land2" d="M0 250 L0 205 Q60 196 120 212 Q150 228 170 240 L430 243 L430 260 L0 260 Z"/>
+    <!-- the peninsula + Trimountain (three hills) -->
+    <g id="s0-hills" class="grow">
+      <path class="land" d="M420 250 L430 236 Q500 228 560 200 Q600 108 640 196 Q680 76 760 190 Q800 148 850 205 Q930 226 1060 238 L1080 250 Z"/>
+    </g>
+    <!-- 1630s houses + meetinghouse -->
+    <g id="s0-houses" class="land" opacity="0">
+      <rect x="590" y="186" width="16" height="12"/><path d="M588 186 L598 178 L608 186 Z"/>
+      <rect x="700" y="176" width="14" height="12"/><path d="M698 176 L707 169 L716 176 Z"/>
+      <rect x="740" y="182" width="18" height="12"/><path d="M738 182 L749 174 L760 182 Z"/>
+      <rect x="812" y="190" width="22" height="16"/><path d="M810 190 L823 182 L836 190 Z"/>
+      <rect x="820" y="166" width="6" height="18"/><path d="M818 168 L823 152 L828 168 Z"/>
+      <rect x="880" y="212" width="16" height="12"/><path d="M878 212 L888 204 L898 212 Z"/>
+    </g>
+    <!-- Mill Pond fill (1807–1820s): earth from the hills goes into the water -->
+    <rect id="s0-fill1" class="land grow" x="880" y="230" width="380" height="22" transform="scale(1 0)"/>
+    <!-- Back Bay fill (1857–1882) -->
+    <path id="s0-fill2" class="land grow" d="M60 252 L60 228 L470 226 L470 252 Z" transform="scale(1 0)"/>
+    <!-- gravel train from Needham -->
+    <g id="s0-train" class="land" opacity="0">
+      <rect x="0" y="-14" width="26" height="12" rx="2"/><rect x="18" y="-22" width="6" height="9"/><rect x="2" y="-20" width="12" height="7"/>
+      <rect x="-30" y="-10" width="26" height="8"/><rect x="-60" y="-10" width="26" height="8"/><rect x="-90" y="-10" width="26" height="8"/><rect x="-120" y="-10" width="26" height="8"/>
+      <path d="M-120 -10 Q-107 -17 -94 -10 M-90 -10 Q-77 -17 -64 -10 M-60 -10 Q-47 -17 -34 -10 M-30 -10 Q-17 -17 -4 -10" class="land"/>
+    </g>
+    <!-- Back Bay brownstones -->
+    <g id="s0-brown" class="land" opacity="0"></g>
+    <!-- Charles River Dam, 1910 -->
+    <g id="s0-dam" class="land2" opacity="0">
+      <rect x="1300" y="236" width="300" height="14"/>
+      <rect x="1380" y="214" width="34" height="24"/><path d="M1376 214 L1397 202 L1418 214 Z"/>
+      <rect x="1470" y="222" width="18" height="16"/>
+    </g>
+    <!-- marsh grass along the waterline, generated by JS -->
+    <g id="s0-marsh" stroke="var(--land2)" stroke-width="2" stroke-linecap="round" fill="none"></g>
+  </svg>
+</div>
+
+<!-- Stops II–V scenery is a long panorama that pans past as you read ("pan" scenes).
+     data-x0 / data-step: which viewBox x sits beside the story card at the start of the stop, and how far
+     the shore slides per passage. data-show="a b" fades an element in between a and b segments into
+     its stop (0 = title card, 1–5 = the five passages); data-hide fades it back out. -->
+
+<!-- Stop II: Fenway tonight, then Griffin's Wharf in 1773 -->
+<div class="scene pan" data-stop="1" data-x0="600" data-step="240" aria-hidden="true">
+  <svg viewBox="0 0 3000 260">
+    <rect class="land2" x="0" y="214" width="3000" height="46"/>
+    <g class="land2">
+      <rect x="380" y="198" width="40" height="16"/><path d="M378 198 L400 186 L422 198 Z"/>
+      <rect x="470" y="202" width="34" height="12"/><path d="M468 202 L487 192 L506 202 Z"/>
+      <rect x="1800" y="200" width="44" height="14"/><path d="M1798 200 L1822 188 L1846 200 Z"/>
+      <rect x="2160" y="198" width="40" height="16"/><path d="M2158 198 L2180 186 L2202 198 Z"/>
+      <rect x="2300" y="202" width="34" height="12"/><path d="M2298 202 L2317 192 L2336 202 Z"/>
+    </g>
+    <!-- Fenway Park tonight: grandstand and light towers, fading as we slip back to 1773 -->
+    <g data-show="-1 -0.5" data-hide="1.7 2.3">
+      <circle cx="843" cy="116" r="36" fill="rgba(255,240,190,0.2)"/><circle cx="1079" cy="116" r="36" fill="rgba(255,240,190,0.2)"/>
+      <path class="land" d="M800 214 L826 184 L1094 184 L1120 214 Z"/>
+      <rect class="land" x="900" y="160" width="120" height="26"/>
+      <rect class="land" x="840" y="120" width="5" height="66"/><rect class="land" x="1076" y="120" width="5" height="66"/>
+      <rect x="826" y="110" width="34" height="11" fill="#fff3c4"/><rect x="1062" y="110" width="34" height="11" fill="#fff3c4"/>
+    </g>
+    <!-- Old South Meeting House -->
+    <g class="land2" data-show="2.85 3.4">
+      <rect x="1400" y="176" width="74" height="38"/><path d="M1398 176 L1437 160 L1476 176 Z"/>
+      <rect x="1476" y="140" width="24" height="74"/><rect x="1480" y="122" width="16" height="18"/><path d="M1480 122 L1488 70 L1496 122 Z"/>
+    </g>
+    <!-- Griffin's Wharf: the Dartmouth, the Eleanor, the Beaver -->
+    <rect class="land" x="1060" y="228" width="720" height="10"/>
+    <g class="land">
+      <path d="M1100 236 L1260 236 L1240 252 L1120 252 Z"/><rect x="1176" y="120" width="5" height="116"/><rect x="1140" y="150" width="76" height="3"/>
+      <path d="M1340 236 L1500 236 L1480 252 L1360 252 Z"/><rect x="1416" y="110" width="5" height="126"/><rect x="1380" y="142" width="76" height="3"/>
+      <path d="M1580 236 L1740 236 L1720 252 L1600 252 Z"/><rect x="1656" y="124" width="5" height="112"/><rect x="1620" y="154" width="76" height="3"/>
+    </g>
+    <circle cx="1220" cy="222" r="3" fill="#f5d58a"/><circle cx="1460" cy="220" r="3" fill="#f5d58a"/><circle cx="1700" cy="223" r="3" fill="#f5d58a"/>
+    <!-- 342 chests over the side -->
+    <g data-show="3.85 4.15" data-hide="5.0 5.4" fill="#8a6038">
+      <rect class="chest" x="1230" y="226" width="9" height="7" style="animation-delay:0s"/>
+      <rect class="chest" x="1206" y="226" width="9" height="7" style="animation-delay:1.1s"/>
+      <rect class="chest" x="1470" y="225" width="9" height="7" style="animation-delay:.5s"/>
+      <rect class="chest" x="1446" y="225" width="9" height="7" style="animation-delay:1.6s"/>
+      <rect class="chest" x="1710" y="226" width="9" height="7" style="animation-delay:.8s"/>
+      <rect class="chest" x="1686" y="226" width="9" height="7" style="animation-delay:1.9s"/>
+    </g>
+    <!-- 1774: a Royal Navy warship enforces the Port Act -->
+    <g class="land" data-show="4.9 5.4">
+      <path d="M1820 238 L2080 238 Q2070 254 2040 256 L1860 256 Q1832 252 1820 238 Z"/>
+      <rect x="1890" y="120" width="5" height="118"/><rect x="1950" y="104" width="6" height="134"/><rect x="2012" y="126" width="5" height="112"/>
+      <rect x="1866" y="150" width="54" height="3"/><rect x="1922" y="134" width="62" height="3"/><rect x="1988" y="154" width="52" height="3"/>
+      <path d="M2080 238 L2130 226" stroke="var(--land)" stroke-width="3"/>
+      <g fill="#f5d58a"><circle cx="1870" cy="246" r="1.6"/><circle cx="1910" cy="246" r="1.6"/><circle cx="1950" cy="246" r="1.6"/><circle cx="1990" cy="246" r="1.6"/><circle cx="2030" cy="246" r="1.6"/></g>
+    </g>
+  </svg>
+</div>
+
+<!-- Stop III: from the Hopkinton start, each wave of arrivals raises its own skyline -->
+<div class="scene pan" data-stop="2" data-x0="600" data-step="240" aria-hidden="true">
+  <svg viewBox="0 0 3000 260">
+    <rect class="land2" x="0" y="226" width="3000" height="34"/>
+    <g class="land2">
+      <rect x="320" y="200" width="36" height="26"/><path d="M318 200 L338 188 L358 200 Z"/>
+      <rect x="430" y="204" width="30" height="22"/><path d="M428 204 L445 194 L462 204 Z"/>
+      <rect x="2200" y="196" width="40" height="30"/><rect x="2250" y="190" width="40" height="36"/><rect x="2300" y="198" width="40" height="28"/>
+      <rect x="2420" y="194" width="40" height="32"/><rect x="2470" y="200" width="40" height="26"/>
+    </g>
+    <!-- Hopkinton: the town green and the start line -->
+    <g class="land2">
+      <rect x="698" y="196" width="4" height="30"/><circle cx="700" cy="190" r="16"/>
+      <rect x="748" y="200" width="4" height="26"/><circle cx="750" cy="194" r="13"/>
+      <rect x="790" y="190" width="40" height="36"/><path d="M788 190 L810 176 L832 190 Z"/><rect x="804" y="160" width="10" height="18"/><path d="M804 160 L809 140 L814 160 Z"/>
+    </g>
+    <g>
+      <rect class="land" x="900" y="150" width="7" height="76"/><rect class="land" x="1030" y="150" width="7" height="76"/>
+      <rect x="896" y="136" width="145" height="22" fill="#1f4e9a"/>
+      <text x="968" y="153" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-weight="800" font-size="16" letter-spacing="3" fill="#f2c230">START</text>
+    </g>
+    <!-- Irish: wooden triple-deckers and a Catholic cathedral -->
+    <g class="land" data-show="1.85 2.4">
+      <rect x="1090" y="160" width="42" height="66"/><rect x="1138" y="154" width="42" height="72"/><rect x="1186" y="162" width="42" height="64"/>
+      <rect x="1088" y="156" width="46" height="4"/><rect x="1136" y="150" width="46" height="4"/><rect x="1184" y="158" width="46" height="4"/>
+      <rect x="1250" y="156" width="80" height="70"/><path d="M1248 156 L1290 128 L1332 156 Z"/>
+      <rect x="1330" y="112" width="24" height="114"/><path d="M1330 112 L1342 58 L1354 112 Z"/>
+    </g>
+    <!-- Italians: North End rowhouses and a church bell tower -->
+    <g class="land" data-show="2.85 3.4">
+      <rect x="1390" y="168" width="34" height="58"/><rect x="1426" y="160" width="30" height="66"/><rect x="1458" y="172" width="32" height="54"/><rect x="1492" y="164" width="30" height="62"/>
+      <rect x="1540" y="104" width="26" height="122"/><path d="M1538 104 L1553 86 L1568 104 Z"/>
+      <rect x="1568" y="176" width="34" height="50"/>
+    </g>
+    <!-- Jewish and Chinese Boston: a domed synagogue and a Chinatown gate -->
+    <g class="land" data-show="3.85 4.4">
+      <rect x="1610" y="172" width="84" height="54"/><path d="M1622 172 Q1652 118 1682 172 Z"/>
+      <rect x="1748" y="178" width="7" height="48"/><rect x="1805" y="178" width="7" height="48"/>
+      <path d="M1732 178 Q1740 172 1746 168 L1816 168 Q1822 172 1830 178 Z"/><path d="M1740 166 Q1780 152 1822 166 Z"/>
+    </g>
+    <!-- Boylston Street: Back Bay brownstones and the finish line -->
+    <g data-show="4.85 5.4">
+      <g class="land">
+        <rect x="1840" y="176" width="22" height="50"/><rect x="1865" y="170" width="22" height="56"/><rect x="1890" y="176" width="22" height="50"/><rect x="1915" y="172" width="22" height="54"/>
+        <rect x="1960" y="150" width="7" height="76"/><rect x="2110" y="150" width="7" height="76"/>
+      </g>
+      <rect x="1956" y="136" width="166" height="22" fill="#f2c230"/>
+      <text x="2039" y="153" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-weight="800" font-size="16" letter-spacing="3" fill="#1f4e9a">FINISH</text>
+    </g>
+  </svg>
+</div>
+
+<!-- Stop IV: campaign night at the old Boston Garden, then back through the family story -->
+<div class="scene pan" data-stop="3" data-x0="600" data-step="240" aria-hidden="true">
+  <svg viewBox="0 0 3000 260">
+    <rect class="land2" x="0" y="226" width="3000" height="34"/>
+    <!-- the elevated Central Artery, going up in the 1950s -->
+    <g class="land2">
+      <rect x="380" y="192" width="1060" height="10"/>
+      <rect x="420" y="202" width="10" height="26"/><rect x="620" y="202" width="10" height="26"/><rect x="1100" y="202" width="10" height="26"/><rect x="1300" y="202" width="10" height="26"/>
+    </g>
+    <!-- searchlights over the rally -->
+    <g data-show="0.3 0.8" data-hide="1.9 2.4">
+      <path class="beam" d="M830 138 L770 -60 L810 -60 Z" fill="rgba(255,240,200,0.22)"/>
+      <path class="beam beam2" d="M920 138 L950 -60 L990 -60 Z" fill="rgba(255,240,200,0.22)"/>
+    </g>
+    <!-- the Garden -->
+    <g class="land">
+      <rect x="760" y="150" width="230" height="76"/><rect x="780" y="136" width="190" height="14"/>
+      <rect x="1010" y="170" width="50" height="56"/><rect x="1066" y="160" width="36" height="66"/>
+    </g>
+    <g data-show="0.3 0.8">
+      <rect x="805" y="166" width="140" height="20" fill="#f4f1e8"/>
+      <rect x="805" y="183" width="140" height="3" fill="#b8202f"/>
+      <text x="875" y="181" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-weight="800" font-size="14" letter-spacing="3" fill="#1d3a7a">KENNEDY</text>
+    </g>
+    <!-- 1849: a famine ship -->
+    <g class="land2" data-show="1.85 2.3" data-hide="2.95 3.3">
+      <path d="M1130 222 L1270 222 L1256 232 L1144 232 Z"/>
+      <rect x="1178" y="150" width="3" height="72"/><rect x="1222" y="160" width="3" height="62"/>
+      <path d="M1181 156 L1212 178 L1181 200 Z"/><path d="M1225 166 L1250 184 L1225 204 Z"/>
+    </g>
+    <!-- 1916: Brahmin Boston, the townhouses of Beacon Hill -->
+    <g class="land" data-show="2.85 3.3">
+      <rect x="1350" y="160" width="28" height="66"/><rect x="1380" y="152" width="28" height="74"/><rect x="1410" y="158" width="28" height="68"/><rect x="1440" y="150" width="28" height="76"/><rect x="1470" y="160" width="28" height="66"/>
+      <rect x="1356" y="152" width="4" height="8"/><rect x="1388" y="144" width="4" height="8"/><rect x="1416" y="150" width="4" height="8"/><rect x="1448" y="142" width="4" height="8"/><rect x="1478" y="152" width="4" height="8"/>
+      <rect x="1510" y="176" width="70" height="50"/><path d="M1506 176 L1545 158 L1584 176 Z"/>
+    </g>
+    <!-- 1946: Charlestown, in his first district: the Bunker Hill Monument -->
+    <g class="land" data-show="3.85 4.3">
+      <path d="M1668 226 L1673 108 L1687 108 L1692 226 Z"/><path d="M1673 108 L1680 96 L1687 108 Z"/>
+      <rect x="1600" y="176" width="40" height="50"/><rect x="1720" y="170" width="40" height="56"/><rect x="1766" y="180" width="36" height="46"/>
+    </g>
+    <!-- "a city upon a hill": the State House dome on Beacon Hill -->
+    <g data-show="4.85 5.3">
+      <circle cx="1920" cy="146" r="52" fill="rgba(255,220,140,0.25)"/>
+      <path class="land2" d="M1780 226 Q1920 176 2060 226 Z"/>
+      <rect class="land" x="1872" y="172" width="96" height="32"/>
+      <rect class="land" x="1902" y="162" width="36" height="10"/>
+      <path d="M1898 162 Q1920 126 1942 162 Z" fill="#d4a640"/><rect x="1918" y="120" width="4" height="10" fill="#d4a640"/>
+    </g>
+  </svg>
+</div>
+
+<!-- Stop V: the harbor today. Pans slowly so City Hall stays in view. -->
+<div class="scene pan" data-stop="4" data-x0="900" data-step="60" aria-hidden="true">
+  <svg viewBox="0 0 3000 260">
+    <rect class="land2" x="0" y="232" width="3000" height="28"/>
+    <!-- skyline -->
+    <g class="land2">
+      <rect x="420" y="150" width="40" height="84"/><rect x="470" y="128" width="46" height="106"/><rect x="526" y="168" width="34" height="66"/>
+      <rect x="580" y="140" width="40" height="94"/><rect x="630" y="170" width="50" height="64"/><rect x="700" y="116" width="44" height="118"/>
+      <rect x="756" y="160" width="36" height="74"/>
+    </g>
+    <!-- Old City Hall, 1865: two centuries of mayors -->
+    <g class="land" data-show="1.85 2.3">
+      <rect x="600" y="184" width="120" height="48"/><path d="M596 184 L606 168 L714 168 L724 184 Z"/>
+      <rect x="645" y="150" width="30" height="18"/><path d="M645 150 Q660 134 675 150 Z"/>
+    </g>
+    <!-- City Hall: the concrete building that's wider at the top -->
+    <g>
+      <path class="land" d="M852 234 V198 H842 V186 H832 V174 H820 V162 H1012 V174 H1000 V186 H990 V198 H980 V234 Z"/>
+      <g fill="#ffd27a" data-show="3.85 4.3">
+        <rect x="828" y="166" width="176" height="3"/><rect x="840" y="178" width="152" height="3"/><rect x="850" y="190" width="132" height="3"/>
+      </g>
+    </g>
+    <!-- the Custom House Tower by the waterfront -->
+    <g class="land" data-show="2.85 3.3">
+      <rect x="1060" y="200" width="70" height="32"/>
+      <rect x="1080" y="96" width="30" height="104"/><path d="M1080 96 L1095 74 L1110 96 Z"/>
+      <circle cx="1095" cy="112" r="4.5" fill="#ffd27a"/>
+    </g>
+    <!-- harbor islands and Boston Light -->
+    <g class="land">
+      <path d="M1180 240 Q1240 220 1300 240 Z"/><path d="M1520 242 Q1580 222 1640 242 Z"/>
+    </g>
+    <g data-show="4.85 5.3">
+      <path d="M1320 236 L1370 236 L1458 236 Q1400 214 1320 236 Z" fill="var(--land)"/>
+      <path d="M1384 236 L1388 184 L1400 184 L1404 236 Z" fill="var(--land)"/>
+      <rect x="1386" y="174" width="16" height="10" fill="#ffd27a"/>
+      <path d="M1394 179 L1560 160 L1560 198 Z" fill="rgba(255,230,160,0.25)"/>
+    </g>
+  </svg>
+</div>
+
+<div id="mist" class="layer" aria-hidden="true"></div>
+<canvas id="waterBack" class="water" aria-hidden="true"></canvas>
+
+<!-- The traveler: the rowboat at Stop I, then a different guide at each stop (built in JS) -->
+<div id="boat" aria-hidden="true">
+  <svg viewBox="0 0 240 140">
+    <g id="ch0">
+    <!-- far oar (behind hull) -->
+    <g id="oarFar" opacity="0.55">
+      <line x1="-46" y1="0" x2="96" y2="0" stroke="#6b4a2c" stroke-width="3.2" stroke-linecap="round"/>
+      <path d="M78 -5 L108 -7 L110 7 L78 5 Z" fill="#6b4a2c"/>
+    </g>
+    <!-- rower (faces the stern, i.e. left — rowers face backwards) -->
+    <g id="rower">
+      <path id="legs" d="M126 96 L144 78 L162 98" stroke="#1d3c3a" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <line id="torso" x1="126" y1="94" x2="116" y2="60" stroke="#1f6f6a" stroke-width="12" stroke-linecap="round"/>
+      <g id="headG">
+        <path d="M118 44 q10 -6 16 4 l6 4 l-3 3 l-6 -3" fill="#2b1d14"/>
+        <circle cx="114" cy="48" r="9.5" fill="#c98f6b"/>
+        <path d="M105 44 q6 -11 18 -3 q-7 -1 -18 3 Z" fill="#2b1d14"/>
+      </g>
+      <line id="arm" x1="116" y1="62" x2="88" y2="76" stroke="#c98f6b" stroke-width="5.5" stroke-linecap="round"/>
+    </g>
+    <!-- hull -->
+    <path d="M12 92 L230 84 Q224 118 178 128 L64 130 Q22 124 12 92 Z" fill="#8b5a33"/>
+    <path d="M18 104 Q120 100 222 98" stroke="#6e4426" stroke-width="1.6" fill="none"/>
+    <path d="M28 116 Q120 113 210 110" stroke="#6e4426" stroke-width="1.6" fill="none"/>
+    <path d="M12 92 L230 84" stroke="#4e2f1a" stroke-width="5" stroke-linecap="round"/>
+    <rect x="114" y="82" width="10" height="7" rx="2" fill="#3a2414"/>
+    <!-- near oar -->
+    <g id="oarNear">
+      <line x1="-46" y1="0" x2="96" y2="0" stroke="#a87442" stroke-width="3.6" stroke-linecap="round"/>
+      <path d="M78 -6 L110 -8 L112 8 L78 6 Z" fill="#a87442"/>
+    </g>
+    </g>
+    <!-- walking / running / skating guides, ground line at y=112 -->
+    <g id="figs" transform="translate(120 112) scale(1.55) translate(-120 -112)"></g>
+  </svg>
+</div>
+
+<canvas id="waterFront" class="water" aria-hidden="true"></canvas>
+
+<!-- ======================= NAV ======================= -->
+<nav id="nav" aria-label="River stops">
+  <div class="brand">Downstream</div>
+  <div id="rivermap">
+    <div class="line"></div><div class="progress"></div>
+  </div>
+</nav>
+
+<!-- ======================= STORY ======================= -->
+<main id="story">
+
+  <div class="seg intro" data-w="1">
+    <p class="eyebrow">A Boston story, told from the water</p>
+    <h1>Downstream</h1>
+    <p>One small boat. One river. Five guides from Boston's sporting life, each with a story about the city that has nothing to do with the game.</p>
+    <p class="scrollhint">Scroll to cast off ↓</p>
+  </div>
+
+  <!-- ===== STOP 1 ===== -->
+  <section class="stop" data-stop="0" data-label="1630s">
+    <div class="seg titlecard" data-w="1">
+      <p class="eyebrow">Stop I · The Charles River Basin</p>
+      <h2>Built from Water</h2>
+      <p class="years">1630s – 1910</p>
+      <p class="guide">Your guide: <b>a Head of the Charles rower</b>, on a slow cool-down paddle the morning after the race.</p>
+      <div class="badge" data-badge="oars"></div>
+    </div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">The river, this morning</p>
+      <p>Easy — let the boat run. This is my favorite part of race weekend. The crowds have gone home, and it's just the oars and the water.</p>
+      <p>Most people think of the Charles as something that flows past Boston. It's closer to the opposite. Boston is something that was poured into the Charles.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">Before Boston</p>
+      <p>Long before any of this, the Massachusett people fished these waters and called the river <em>Quinobequin</em> — "the meandering one." The hilly peninsula up ahead was <em>Shawmut</em>: under 800 acres of land, tied to the mainland by a neck of sand so thin that high tides nearly swept over it.</p>
+      <p>By the time English ships arrived, epidemics carried by European traders had already killed most of the Massachusett living here.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">1630</p>
+      <p>John Winthrop's Puritans landed first in Charlestown, but they were short on fresh water. A lone Englishman, William Blaxton, was already living on Shawmut beside a good spring, and he invited them across.</p>
+      <p>They named the place Boston, after a town in Lincolnshire. For a while they also called it Trimountaine, for its three steep hills. See them? Hold on to that picture — it's about to change.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">1800s · Moving the hills</p>
+      <p>As the town grew, it ran out of room. So Bostonians did something remarkable: they cut the tops off their own hills and dumped them into the water.</p>
+      <p>Beacon Hill lost roughly sixty feet. That earth filled the old Mill Pond, which is now the streets around North Station. The hills went down, and the shoreline crept out.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">1857 – 1882 · The Back Bay</p>
+      <p>The biggest job was the Back Bay. A mill dam had cut that tidal flat off from the sea, and it had turned into a stinking marsh full of sewage. In 1857 the city started filling it in.</p>
+      <p>Trains hauled gravel from Needham, nine miles west, day and night for decades. Every brownstone on Commonwealth Avenue stands on what used to be the bottom of a bay.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">1910 · Still water</p>
+      <p>Even this calm water isn't natural. In 1910 a dam near the river's mouth shut out the tide, turning a muddy estuary into a basin smooth enough to race on.</p>
+      <p>By then Boston had nearly tripled in size. So when I pull this oar, I'm rowing along the edge of a city that was poured into the river. Keep drifting toward the harbor. The old waterfront is up ahead, though these days it's on dry land.</p>
+      <p class="speaker">— the rower</p>
+    </div></div>
+  </section>
+
+  <div class="seg transit" data-w="0.9"><p>The fog lifts, and the light goes out of the sky…</p><span class="arrow">Downstream · December 1773</span></div>
+
+  <!-- ===== STOP 2 ===== -->
+  <section class="stop" data-stop="1" data-label="1773">
+    <div class="seg titlecard" data-w="1">
+      <p class="eyebrow">Stop II · Griffin's Wharf</p>
+      <h2>The Boston Tea Party</h2>
+      <p class="years">December 16, 1773</p>
+      <p class="guide">Your guide: <b>a Red Sox fan</b> who wanders off from the ballpark and onto the old harbor line.</p>
+      <div class="badge" data-badge="sox"></div>
+    </div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">Leaving Fenway</p>
+      <p>Night game's over and I'm not ready to go home, so I walk. Most people in those seats don't know this, but Fenway sits on the Fens, an old salt marsh that got filled in just like the Back Bay.</p>
+      <p>By the time I reach Congress Street, I'm standing on land that was open harbor in 1773. Griffin's Wharf was right about here. Picture it with me: three ships tied up, and a town full of very angry people.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">1773 · Tea and taxes</p>
+      <p>That spring, Parliament passed the Tea Act. It actually made tea cheaper, but it kept a tax the colonists had never agreed to, and it handed the trade to a single company. To a lot of Bostonians, cheap taxed tea was a trap: drink it, and you'd accepted Parliament's right to tax you.</p>
+      <p>In late November the <em>Dartmouth</em> tied up at Griffin's Wharf, and the <em>Eleanor</em> and the <em>Beaver</em> soon followed. By law, their cargo had to be unloaded and taxed within twenty days. The clock would run out on December 17.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">December 16 · Old South Meeting House</p>
+      <p>On the last day, about five thousand people packed into Old South Meeting House and spilled out into the street. They waited while the <em>Dartmouth</em>'s owner rode out to ask Governor Thomas Hutchinson to let the ships sail back to England, tax unpaid. Near sundown the answer came back: no.</p>
+      <p>As the story goes, Samuel Adams rose and said, "This meeting can do nothing more to save the country." Signal or not, the crowd started moving toward the water.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">That night · On the ships</p>
+      <p>Somewhere between thirty and a hundred and thirty men boarded the three ships, some loosely disguised as Mohawk Indians with soot on their faces. For about three hours they hauled chests up from the holds, split them open with hatchets, and dumped them over the side: 342 chests, more than 90,000 pounds of tea.</p>
+      <p>The tide was low, so the tea piled up in the shallows like haystacks, and men had to climb down and push it under. They worked almost in silence and, by their own accounts, took nothing else.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">1774 · The harbor closes</p>
+      <p>London's answer was fierce. The Boston Port Act shut the harbor to all shipping until the tea was paid for. In a town that lived off the water, that meant idle wharves and empty tables. The other colonies sent food overland, then sent delegates to the First Continental Congress. Seven months later, the shooting started at Lexington and Concord.</p>
+      <p>So the spark of the Revolution was an act of water. They didn't burn the tea. They gave it to the harbor, and that harbor is now dry land under the street I'm standing on.</p>
+      <p class="speaker">— the Red Sox fan</p>
+    </div></div>
+  </section>
+
+  <div class="seg transit" data-w="0.9"><p>Morning again. A starting gun echoes across the hills…</p><span class="arrow">Downstream · 1847 – today</span></div>
+
+  <!-- ===== STOP 3 ===== -->
+  <section class="stop" data-stop="2" data-label="1847">
+    <div class="seg titlecard" data-w="1">
+      <p class="eyebrow">Stop III · The neighborhoods</p>
+      <h2>Waves of Arrival</h2>
+      <p class="years">1847 – today</p>
+      <p class="guide">Your guide: <b>a Boston Marathon runner</b>, taking the city mile by mile.</p>
+      <div class="badge" data-badge="bib"></div>
+    </div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">Mile 0 · Hopkinton</p>
+      <p>It's 26.2 miles from here to Boylston Street. The first Boston Marathon, in 1897, had fifteen starters. Now it's about thirty thousand runners from more than a hundred countries, which feels right for this city.</p>
+      <p>Fair warning: the course doesn't go through the North End or Chinatown. But every mile of it runs past somebody's arrival story. I think about them when my legs start to hurt.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">1847 · The Irish</p>
+      <p>When the potato blight struck Ireland, famine drove more than a million people from the country. In 1847 alone, about 37,000 Irish arrived in Boston, a city of only about 115,000. Most came with almost nothing and crowded into cellars and tenements along the waterfront.</p>
+      <p>They took the hardest work there was: digging, hauling, laying railroad track, and filling in the Back Bay from Stop I. Plenty of Boston didn't want them. In 1854 the anti-immigrant Know-Nothing party swept the state elections. Thirty years later, Boston elected its first Irish-born mayor.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">1880s – 1920s · The Italians</p>
+      <p>Next came the Italians, mostly from southern Italy and Sicily, and many of them settled in the North End. Whole villages rebuilt themselves there, street by street. Neighbors from the same hometown lived on the same block and honored the same patron saint.</p>
+      <p>In 1873 they founded St. Leonard's, the first church built by Italian immigrants in New England. By the 1920s the neighborhood was overwhelmingly Italian, and the saints' feasts they started still parade through its narrow streets every summer.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">Mile 24 · Brookline</p>
+      <p>Here's where the course and the history finally meet. Around 1900, Jewish families escaping persecution in Eastern Europe landed in the North End and the West End. Over the next decades they moved out to Roxbury and Dorchester, then to Brookline and Newton, right along the road I'm running.</p>
+      <p>Chinese workers, meanwhile, built Chinatown starting in the 1870s, on filled land at the old South Cove. They did it under the Chinese Exclusion Act, a federal law that for sixty years barred nearly all new immigrants from China.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">Mile 26.2 · Boylston Street</p>
+      <p>The waves never stopped. Cape Verdeans, Haitians, Vietnamese, Dominicans and Salvadorans built their own corners of Dorchester, Mattapan, Jamaica Plain and East Boston. Back at mile 6, Framingham has one of the largest Brazilian communities in the country. Today, more than a quarter of Bostonians were born in another country.</p>
+      <p>And the finish line? Boylston Street, in the Back Bay, on land the Irish helped pour into the water. Every step of this race lands on something built by people who got here with next to nothing.</p>
+      <p class="speaker">— the marathoner</p>
+    </div></div>
+  </section>
+
+  <div class="seg transit" data-w="0.9"><p>The air turns hazy. A crowd roars somewhere nearby…</p><span class="arrow">Downstream · November 1960</span></div>
+
+  <!-- ===== STOP 4 ===== -->
+  <section class="stop" data-stop="3" data-label="1960">
+    <div class="seg titlecard" data-w="1">
+      <p class="eyebrow">Stop IV · The Boston Garden</p>
+      <h2>From Famine Ship to White House</h2>
+      <p class="years">1849 – 1961</p>
+      <p class="guide">Your guide: <b>a Celtics player</b>, dribbling out of the old Boston Garden on November 7, 1960. The team has won back-to-back titles, but tonight the Garden belongs to someone else.</p>
+      <div class="badge" data-badge="celtics"></div>
+    </div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">November 7, 1960 · The Garden</p>
+      <p>We've won the last two championships, and tonight we still got bumped off our own floor. Every seat in the Garden is full and Causeway Street is jammed, and none of these people came for basketball. It's the last night of the presidential campaign, and the candidate came home to finish it here.</p>
+      <p>The country votes tomorrow. To see how a Boston kid got this far, you have to go back to the docks.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">1849 · East Boston</p>
+      <p>His great-grandfather, Patrick Kennedy, was one of the famine Irish from Stop III. He left County Wexford, came ashore in East Boston in 1849, and worked as a barrel maker. He died of cholera at thirty-five, leaving a widow and four small children.</p>
+      <p>His son P.J. grew up poor, opened a saloon, and worked his way into politics. In this town, that's how Irish families climbed: one ward, one favor, one election at a time.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">1916 · Honey Fitz vs. the Brahmins</p>
+      <p>His other grandfather was John "Honey Fitz" Fitzgerald, born in the North End and twice mayor of Boston. Old Boston was run by the Brahmins, Protestant Yankee families whose names were on the banks and the colleges. In 1916, Honey Fitz ran for the U.S. Senate against one of the grandest of them, Henry Cabot Lodge.</p>
+      <p>He lost. But the family had a long memory.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">1946 – 1952 · The grandson</p>
+      <p>Jack Kennedy was born in Brookline in 1917. Home from the war in 1946, he won a seat in Congress representing the waterfront neighborhoods his family came from: East Boston, the North End, Charlestown.</p>
+      <p>In 1952 he ran for the Senate against Henry Cabot Lodge Jr. That made it Honey Fitz's grandson against the grandson of the man who had beaten him. Kennedy won by about seventy thousand votes. It took thirty-six years, but the immigrant side of the family had evened the score.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">Tomorrow, and after</p>
+      <p>Tonight he's up on that stage. Tomorrow he'll be elected the first Catholic president, in one of the closest races in American history. Two months later, back in Boston, he'll tell the state legislature that the nation must be "as a city upon a hill." Those are John Winthrop's words from 1630, now spoken by the great-grandson of a famine immigrant.</p>
+      <p>Same city. Same hill. Very different crowd.</p>
+      <p class="speaker">— the Celtics player</p>
+    </div></div>
+  </section>
+
+  <div class="seg transit" data-w="0.9"><p>The haze burns off. The air turns cold and bright…</p><span class="arrow">Downstream · 2021</span></div>
+
+  <!-- ===== STOP 5 ===== -->
+  <section class="stop" data-stop="4" data-label="2021">
+    <div class="seg titlecard" data-w="1">
+      <p class="eyebrow">Stop V · City Hall, by the harbor</p>
+      <h2>A First for City Hall</h2>
+      <p class="years">November 2021</p>
+      <p class="guide">Your guide: <b>a PWHL Boston Fleet player</b>, skating on the harbor ice below City Hall.</p>
+      <div class="badge" data-badge="fleet"></div>
+    </div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">The harbor, on skates</p>
+      <p>Professional women's hockey in Boston is still new. Our league dropped its first puck in 2024. So I think a lot about firsts, and how they take forever and then seem to happen all at once.</p>
+      <p>Look up past the waterfront. That concrete building that's wider at the top than at the bottom is City Hall. In 2021, something happened in there for the first time in two hundred years.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">1822 – 2021 · Two centuries of mayors</p>
+      <p>Boston became a city in 1822. For the next two hundred years, every mayor the voters chose was a white man. First came the Yankee Brahmins. Then came the Irish: Hugh O'Brien, Honey Fitz from Stop IV, James Michael Curley. Irish American mayors ran the city for most of the twentieth century.</p>
+      <p>The city changed faster than City Hall did. By the 2000 census, most Bostonians were people of color, but the mayor's office still hadn't caught up.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">Michelle Wu</p>
+      <p>Michelle Wu grew up in Chicago, the daughter of immigrants from Taiwan. She came to Boston for Harvard. When her mother became seriously ill, she took on caring for her and raising her younger sisters, while she was in law school. One of her professors and mentors there was Elizabeth Warren.</p>
+      <p>In 2013 she won a seat on the city council, the first Asian American woman ever to do it. Three years later her colleagues made her council president, the first woman of color in that job.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">2021 · The race</p>
+      <p>In March 2021, Mayor Marty Walsh left to become U.S. Secretary of Labor. Council president Kim Janey stepped in as acting mayor, the first woman and the first Black Bostonian to hold the office. That fall, every major candidate for mayor was a woman, a person of color, or both, and the final two were both women.</p>
+      <p>On November 2, Boston voters chose Michelle Wu by nearly two to one. She was the first woman, and the first person of color, they had ever elected mayor.</p>
+    </div></div>
+
+    <div class="seg beat" data-w="1"><div class="card">
+      <p class="kicker">Today · Back to the water</p>
+      <p>From out here on the ice, I can see the whole story at once: the harbor where the tea went in, the waterfront where the famine ships came ashore, the old wharves buried under landfill, and City Hall above it all.</p>
+      <p>Boston started as a hilly little peninsula that ran out of room. It made more land, and then, slowly and unevenly, more room for more people, one first at a time. There are still firsts left.</p>
+      <p class="speaker">— the Fleet player</p>
+    </div></div>
+  </section>
+
+  <div class="seg outro" data-w="1">
+    <p class="eyebrow">Open water</p>
+    <h2>The Harbor</h2>
+    <p>The boat drifts out past the harbor islands. One river, five guides, four centuries, and every one of these stories touched the water. Boston didn't just grow up beside it. The city was built out of it.</p>
+    <p class="fineprint">The guides are fictional. The history they tell is real.</p>
+  </div>
+
+</main>
+
+<div id="spacer"></div>
+
+<script>
+(() => {
+  // ---------------- Era palettes (one per stop) ----------------
+  const PALETTES = [
+    // deck/deckEdge/seams/stripe*: the walkway the guide travels on (wharf planks, marathon road, seawall)
+    { skyTop:'#9fb4c8', skyBot:'#f2d6bf', sun:'#ffe6bd', sunFrac:0.62, land:'#5d6b72', land2:'#8a979c', waterTop:'#9db3bd', waterDeep:'#2f4f60', glint:'#fff3df', ink:'#24323a', mist:0.35, stars:0, boat:1,
+      deck:'#7a6248', deckEdge:'#4a3a2a', seams:0.8, stripe:'#2f6fd6', stripe2:'#f2c230', stripeA:0 },     // dawn mist
+    { skyTop:'#0e1430', skyBot:'#3a3556', sun:'#f1ead2', sunFrac:0.55, land:'#080b16', land2:'#171b2e', waterTop:'#2b3350', waterDeep:'#060914', glint:'#f5d58a', ink:'#f2ead8', mist:0.06, stars:1, boat:0.78,
+      deck:'#6a5238', deckEdge:'#33271b', seams:0.9, stripe:'#2f6fd6', stripe2:'#f2c230', stripeA:0 },     // 1773 night — Griffin's Wharf planks
+    { skyTop:'#6fb3e0', skyBot:'#eaf4f4', sun:'#fff8e1', sunFrac:0.62, land:'#4f6656', land2:'#88a08f', waterTop:'#86bdd2', waterDeep:'#1f5d7a', glint:'#ffffff', ink:'#1d3442', mist:0, stars:0, boat:1.05,
+      deck:'#6c7076', deckEdge:'#44474c', seams:0, stripe:'#2f6fd6', stripe2:'#f2c230', stripeA:0.95 },    // April morning — road with the painted marathon line
+    { skyTop:'#b39b76', skyBot:'#e9c48e', sun:'#ffd99a', sunFrac:0.5, land:'#463c34', land2:'#75685a', waterTop:'#94906e', waterDeep:'#3a3a2a', glint:'#f6e3b0', ink:'#2e261d', mist:0.28, stars:0, boat:0.9,
+      deck:'#8d877b', deckEdge:'#5c574e', seams:0.35, stripe:'#2f6fd6', stripe2:'#f2c230', stripeA:0 },    // 1950s haze — concrete seawall
+    { skyTop:'#3a7cb6', skyBot:'#f6d3a2', sun:'#ffd27a', sunFrac:0.72, land:'#1f3043', land2:'#3c5265', waterTop:'#4b98b4', waterDeep:'#0b3c5a', glint:'#fff1c9', ink:'#102332', mist:0, stars:0, boat:0.95,
+      deck:'#8d877b', deckEdge:'#5c574e', seams:0, stripe:'#2f6fd6', stripe2:'#f2c230', stripeA:0 },       // harbor, golden hour — ice
+  ];
+
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const root = document.documentElement;
+  const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+  const lerp = (a, b, f) => a + (b - a) * f;
+  const smooth = (a, b, v) => { const x = clamp((v - a) / (b - a)); return x * x * (3 - 2 * x); };
+  const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const mixRGB = (a, b, f) => a.map((v, i) => Math.round(lerp(v, b[i], f)));
+  const rgb = (c, a = 1) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+  const P = PALETTES.map(p => { const o = {}; for (const k in p) o[k] = typeof p[k] === 'string' ? hex(p[k]) : p[k]; return o; });
+
+  // ---------------- Timeline: every .seg gets a slice of scroll ----------------
+  const segs = [...document.querySelectorAll('.seg')].map(el => {
+    const stopEl = el.closest('.stop');
+    return { el, w: parseFloat(el.dataset.w || 1), stop: stopEl ? +stopEl.dataset.stop : null };
+  });
+  let acc = 0;
+  segs.forEach(s => { s.s = acc; acc += s.w; s.c = s.s + s.w / 2; });
+  const TOTAL = acc;
+  segs[0].first = true; segs[segs.length - 1].last = true;
+
+  const stops = [...document.querySelectorAll('.stop')].map((el, i) => {
+    const mine = segs.filter(s => s.stop === i);
+    return { label: el.dataset.label, a: mine[0].s, b: mine[mine.length - 1].s + mine[mine.length - 1].w };
+  });
+  const scenes = [...document.querySelectorAll('.scene')];
+  // Scenery that appears/disappears as you read: data-show="a b" / data-hide="c d", in segments into its stop
+  const showEls = [...document.querySelectorAll('[data-show]')].map(el => {
+    const [a, b] = el.dataset.show.split(' ').map(Number);
+    const hide = el.dataset.hide ? el.dataset.hide.split(' ').map(Number) : null;
+    return { el, a, b, hide, stop: +el.closest('.scene').dataset.stop };
+  });
+
+  const spacer = document.getElementById('spacer');
+  spacer.style.height = `calc(${TOTAL} * 100svh + 100svh)`;
+  const tFromScroll = () => {
+    const max = document.documentElement.scrollHeight - innerHeight;
+    return max > 0 ? clamp(scrollY / max) * TOTAL : 0;
+  };
+  const scrollToT = t => {
+    const max = document.documentElement.scrollHeight - innerHeight;
+    scrollTo({ top: (t / TOTAL) * max, behavior: reduceMotion ? 'auto' : 'smooth' });
+  };
+
+  // ---------------- River map nav ----------------
+  const map = document.getElementById('rivermap');
+  const mapProgress = map.querySelector('.progress');
+  const dotPos = i => 4 + (92 * i) / (stops.length - 1);   // percent, evenly spaced
+  const mapPos = t => {
+    if (t <= stops[0].a) return (t / stops[0].a) * dotPos(0);
+    for (let i = 0; i < stops.length - 1; i++)
+      if (t < stops[i + 1].a) return lerp(dotPos(i), dotPos(i + 1), (t - stops[i].a) / (stops[i + 1].a - stops[i].a));
+    const last = stops[stops.length - 1].a;
+    return lerp(dotPos(stops.length - 1), 100, (t - last) / (TOTAL - last));
+  };
+  const mapDots = stops.map((st, i) => {
+    const b = document.createElement('button');
+    b.style.left = `${dotPos(i)}%`;
+    b.setAttribute('aria-label', `Go to stop ${i + 1}: ${st.label}`);
+    b.innerHTML = `<span>${st.label}</span>`;
+    b.addEventListener('click', () => scrollToT(st.a + 0.5));
+    map.appendChild(b);
+    return b;
+  });
+
+  // ---------------- Stop 1 scene: generated details ----------------
+  const NS = 'http://www.w3.org/2000/svg';
+  const marsh = document.getElementById('s0-marsh');
+  for (let x = 140; x < 1300; x += 9 + Math.random() * 14) {
+    const h = 6 + Math.random() * 14, lean = (Math.random() - 0.5) * 8;
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', `M${x} 252 q${lean / 2} ${-h / 2} ${lean} ${-h}`);
+    marsh.appendChild(p);
+  }
+  const brown = document.getElementById('s0-brown');
+  for (let i = 0; i < 11; i++) {
+    const x = 170 + i * 25, h = 44 + (i % 3) * 6;
+    brown.insertAdjacentHTML('beforeend',
+      `<rect x="${x}" y="${226 - h}" width="22" height="${h}"/>` +
+      `<path d="M${x - 1} ${226 - h} L${x + 4} ${220 - h} L${x + 18} ${220 - h} L${x + 23} ${226 - h} Z"/>`);
+  }
+  const s0 = {
+    hills: document.getElementById('s0-hills'),
+    houses: document.getElementById('s0-houses'),
+    fill1: document.getElementById('s0-fill1'),
+    fill2: document.getElementById('s0-fill2'),
+    train: document.getElementById('s0-train'),
+    brown, marsh,
+    dam: document.getElementById('s0-dam'),
+  };
+  // u = segments elapsed inside stop 1: 0 title, 1 river, 2 Massachusett, 3 Puritans, 4 hills, 5 Back Bay, 6 dam
+  function animateStop1(u) {
+    s0.houses.setAttribute('opacity', smooth(3.0, 3.6, u));
+    const cut = smooth(4.05, 4.85, u);
+    s0.hills.style.transform = `scaleY(${lerp(1, 0.58, cut)})`;
+    s0.fill1.style.transform = `scaleY(${smooth(4.2, 4.95, u)})`;
+    s0.fill2.style.transform = `scaleY(${smooth(5.05, 5.6, u)})`;
+    s0.marsh.setAttribute('opacity', 1 - smooth(4.3, 5.4, u) * 0.85);
+    const tr = clamp((u - 5.0) / 1.0);
+    s0.train.setAttribute('opacity', tr > 0 && tr < 1 ? Math.min(1, Math.sin(tr * Math.PI) * 3) : 0);
+    s0.train.setAttribute('transform', `translate(${lerp(-60, 520, tr)} 226)`);
+    s0.brown.setAttribute('opacity', smooth(5.45, 5.95, u));
+    s0.brown.setAttribute('transform', `translate(0 ${lerp(16, 0, smooth(5.45, 5.95, u))})`);
+    s0.dam.setAttribute('opacity', smooth(6.05, 6.5, u));
+  }
+
+  // ---------------- Water canvases ----------------
+  const back = document.getElementById('waterBack'), front = document.getElementById('waterFront');
+  const bctx = back.getContext('2d'), fctx = front.getContext('2d');
+  let W = 0, H = 0, waterH = 0, base = 0, dpr = 1;
+  function resize() {
+    dpr = Math.min(2, devicePixelRatio || 1);
+    W = innerWidth; H = innerHeight;
+    waterH = Math.round(H * (W < 720 ? 0.38 : 0.42));
+    base = H - waterH;
+    for (const c of [back, front]) { c.width = W * dpr; c.height = H * dpr; }
+    bctx.setTransform(dpr, 0, 0, dpr, 0, 0); fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    root.style.setProperty('--water-h', waterH + 'px');
+  }
+  addEventListener('resize', resize); resize();
+
+  // Seeded random glints so they don't jump between frames
+  let seed = 7; const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const glints = Array.from({ length: 110 }, () => ({ u: rand(), v: rand(), p: rand() * 6.28 }));
+  const sunGlints = Array.from({ length: 70 }, () => ({ u: rand(), v: rand(), p: rand() * 6.28 }));
+  const ripples = [];
+
+  const BANDS = 6, BOAT_BAND = 3;
+  const bandDepth = i => Math.pow(i / (BANDS - 1), 1.6) * waterH * 0.92;
+  function waveY(i, x, worldX, time) {
+    const f = i / (BANDS - 1);
+    const amp = 2.5 + f * 9, k = 0.012 - f * 0.0055, par = 1 + f * 1.6;
+    return base + bandDepth(i)
+      + amp * Math.sin(k * (x + worldX * par) + time * (0.8 + f * 0.5) + i * 1.7)
+      + amp * 0.4 * Math.sin(k * 2.3 * (x + worldX * par) - time * 1.25 + i);
+  }
+  const vToY = v => base + Math.pow(v, 1.6) * waterH * 0.92;
+  const mod = (a, n) => ((a % n) + n) % n;
+
+  function drawBand(ctx, i, pal, worldX, time) {
+    const f = i / (BANDS - 1);
+    const c = mixRGB(pal.waterTop, pal.waterDeep, Math.pow(f, 0.8) * 0.95);
+    ctx.fillStyle = rgb(c, i === BOAT_BAND ? 0.94 : 1);
+    ctx.beginPath(); ctx.moveTo(0, H);
+    for (let x = 0; x <= W + 16; x += 16) ctx.lineTo(x, waveY(i, x, worldX, time));
+    ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+    // soft highlight on each crest line
+    ctx.strokeStyle = rgb(pal.glint, 0.08 + (1 - f) * 0.1); ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x <= W + 16; x += 16) { const y = waveY(i, x, worldX, time); x ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.stroke();
+  }
+  function drawGlints(ctx, pal, worldX, time, vMin, vMax, sunX) {
+    ctx.lineCap = 'round';
+    for (const g of glints) {
+      if (g.v < vMin || g.v >= vMax) continue;
+      const span = W * 1.4;
+      const x = mod(g.u * span - worldX * (0.6 + g.v * 1.8) + Math.sin(time * 0.5 + g.p) * 8, span) - W * 0.2;
+      const y = vToY(g.v) + 3 + g.v * 10;
+      const a = (0.25 + 0.75 * Math.max(0, Math.sin(time * 1.6 + g.p * 3))) * (0.35 + g.v * 0.4);
+      const len = 5 + g.v * 26;
+      ctx.strokeStyle = rgb(pal.glint, a * 0.6); ctx.lineWidth = 1 + g.v * 1.5;
+      ctx.beginPath(); ctx.moveTo(x - len / 2, y); ctx.lineTo(x + len / 2, y); ctx.stroke();
+    }
+    // Reflection column under the sun/moon — stays put while the world slides by
+    for (const g of sunGlints) {
+      if (g.v < vMin || g.v >= vMax) continue;
+      const x = sunX + (g.u - 0.5) * (24 + g.v * 200) + Math.sin(time * 0.9 + g.p) * 6;
+      const y = vToY(g.v) + 3 + g.v * 10;
+      const a = (0.3 + 0.7 * Math.max(0, Math.sin(time * 2.2 + g.p * 2))) * (1 - g.v * 0.5);
+      const len = 6 + g.v * 30;
+      ctx.strokeStyle = rgb(pal.sun, a * 0.75); ctx.lineWidth = 1.2 + g.v * 1.6;
+      ctx.beginPath(); ctx.moveTo(x - len / 2, y); ctx.lineTo(x + len / 2, y); ctx.stroke();
+    }
+  }
+
+  // ---------------- Boat ----------------
+  const boat = document.getElementById('boat');
+  const oarNear = document.getElementById('oarNear'), oarFar = document.getElementById('oarFar');
+  const torso = document.getElementById('torso'), arm = document.getElementById('arm'), headG = document.getElementById('headG');
+  const PIVOT = [119, 85], HIPS = [126, 94], TORSO_LEN = 35;
+  let phase = 0, gphase = 0, activity = 0, lastSin = 0;
+
+  function poseRower(oarDeg, lean) {
+    const r = oarDeg * Math.PI / 180;
+    oarNear.setAttribute('transform', `translate(${PIVOT[0]} ${PIVOT[1]}) rotate(${oarDeg})`);
+    oarFar.setAttribute('transform', `translate(${PIVOT[0] + 4} ${PIVOT[1] - 3}) rotate(${oarDeg - 4})`);
+    const hx = PIVOT[0] - 46 * Math.cos(r), hy = PIVOT[1] - 46 * Math.sin(r);     // oar handle
+    const la = (-107 + lean) * Math.PI / 180;                                     // torso angle
+    const sx = HIPS[0] + TORSO_LEN * Math.cos(la), sy = HIPS[1] + TORSO_LEN * Math.sin(la);
+    torso.setAttribute('x2', sx.toFixed(1)); torso.setAttribute('y2', sy.toFixed(1));
+    arm.setAttribute('x1', sx.toFixed(1)); arm.setAttribute('y1', (sy + 2).toFixed(1));
+    arm.setAttribute('x2', hx.toFixed(1)); arm.setAttribute('y2', hy.toFixed(1));
+    headG.setAttribute('transform', `translate(${(sx - 116).toFixed(1)} ${(sy - 60).toFixed(1)})`);
+  }
+
+  // ---------------- Guide badges on the title cards (front-view jerseys / gear) ----------------
+  // Team marks here are simple stand-in emblems, not official logos.
+  const OAR = `<line x1="60" y1="4" x2="60" y2="76" stroke="#c9a46b" stroke-width="5" stroke-linecap="round"/><path d="M51 70 h18 l-2 36 h-14 Z" fill="#1f6f6a"/><rect x="52" y="84" width="16" height="5" fill="#f4f1e8"/>`;
+  const BADGES = {
+    oars: `<svg viewBox="0 0 120 110"><g transform="rotate(-32 60 56)">${OAR}</g><g transform="rotate(32 60 56)">${OAR}</g></svg>`,
+    sox: `<svg viewBox="0 0 120 110">
+      <path d="M38 8 L50 4 Q60 12 70 4 L82 8 L108 26 L98 46 L86 40 L86 106 L34 106 L34 40 L22 46 L12 26 Z" fill="#f6f3ec" stroke="#cfc8b8" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M50 4 Q60 14 70 4" fill="none" stroke="#bd1e2d" stroke-width="2.5"/>
+      <path d="M12 26 L22 46 M108 26 L98 46" stroke="#bd1e2d" stroke-width="3.5"/>
+      <line x1="60" y1="12" x2="60" y2="106" stroke="#bd1e2d" stroke-width="1.5"/>
+      ${[30, 64, 82, 98].map(y => `<circle cx="63.5" cy="${y}" r="1.4" fill="#1d2a44"/>`).join('')}
+      <text x="59" y="58" text-anchor="middle" font-family="Fraunces, Georgia, serif" font-style="italic" font-weight="700" font-size="17" fill="#bd1e2d" stroke="#1d2a44" stroke-width="0.9" paint-order="stroke">Red Sox</text>
+      <g transform="translate(97 26) scale(1.9)"><path d="M-3.3 -3.7 H-0.9 V0.5 H1.0 A1.1 1.1 0 0 1 1.0 2.7 H-1.9 A1.4 1.4 0 0 1 -3.3 1.3 Z M0.5 -4.5 H2.9 V-0.3 H4.8 A1.1 1.1 0 0 1 4.8 1.9 H1.9 A1.4 1.4 0 0 1 0.5 0.5 Z" fill="#bd1e2d"/></g>
+    </svg>`,
+    bib: `<svg viewBox="0 0 120 110">
+      <rect x="10" y="16" width="100" height="78" rx="5" fill="#fff" stroke="#d5d5d5" stroke-width="1.5"/>
+      <rect x="10" y="16" width="100" height="18" rx="5" fill="#1f4e9a"/><rect x="10" y="28" width="100" height="6" fill="#1f4e9a"/>
+      <text x="60" y="29.5" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="11" letter-spacing="3" fill="#fff">BOSTON</text>
+      <text x="60" y="73" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-weight="800" font-size="32" fill="#1f2a30">1897</text>
+      <rect x="10" y="82" width="100" height="7" fill="#f2c230"/>
+      ${[[18, 22], [102, 22], [18, 88], [102, 88]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="2.6" fill="none" stroke="#9aa0a6" stroke-width="1.4"/>`).join('')}
+    </svg>`,
+    celtics: `<svg viewBox="0 0 120 110">
+      <path d="M40 6 Q60 30 80 6 L90 8 Q90 32 102 42 L102 106 L18 106 L18 42 Q30 32 30 8 Z" fill="#f6f4ee" stroke="#1e7a3e" stroke-width="3.5" stroke-linejoin="round"/>
+      <path id="celArc" d="M28 62 Q60 38 92 62" fill="none"/>
+      <text font-family="Inter, system-ui, sans-serif" font-weight="800" font-size="12.5" letter-spacing="1.5" fill="#1e7a3e"><textPath href="#celArc" startOffset="50%" text-anchor="middle">CELTICS</textPath></text>
+      <g transform="translate(60 80) scale(3.4)">
+        <circle cx="0" cy="-1.7" r="1.55" fill="#1e7a3e"/><circle cx="-1.6" cy="0.3" r="1.55" fill="#1e7a3e"/><circle cx="1.6" cy="0.3" r="1.55" fill="#1e7a3e"/>
+        <path d="M0 0.5 q0.4 2 1.4 3" stroke="#1e7a3e" stroke-width="0.8" fill="none"/>
+      </g>
+    </svg>`,
+    fleet: `<svg viewBox="0 0 120 110">
+      <defs>
+        <pattern id="fleetWaves" width="7" height="4.2" patternUnits="userSpaceOnUse">
+          <rect width="7" height="4.2" fill="#c6eadf"/>
+          <path d="M0 2.1 q1.75 -1.6 3.5 0 t3.5 0" stroke="#2e5a3f" stroke-width="0.7" fill="none"/>
+        </pattern>
+        <clipPath id="fleetBody"><path d="M36 6 L48 3 L60 16 L72 3 L84 6 L112 24 L114 72 L96 74 L92 42 L92 106 L28 106 L28 42 L24 74 L6 72 L8 24 Z"/></clipPath>
+      </defs>
+      <g clip-path="url(#fleetBody)">
+        <rect width="120" height="110" fill="#2e5a3f"/>
+        <!-- mint shoulder yoke -->
+        <path d="M0 0 H120 V34 L92 28 Q60 22 28 28 L0 34 Z" fill="#c6eadf"/>
+        <!-- sleeve stripes: mint / white / mint -->
+        <g><rect x="0" y="52" width="30" height="3.4" fill="#c6eadf"/><rect x="0" y="57" width="30" height="2.4" fill="#f6f8f5"/><rect x="0" y="61.4" width="30" height="3.4" fill="#c6eadf"/>
+           <rect x="90" y="52" width="30" height="3.4" fill="#c6eadf"/><rect x="90" y="57" width="30" height="2.4" fill="#f6f8f5"/><rect x="90" y="61.4" width="30" height="3.4" fill="#c6eadf"/></g>
+        <!-- hem stripes -->
+        <rect x="0" y="80" width="120" height="3" fill="#c6eadf"/><rect x="0" y="85" width="120" height="2.2" fill="#f6f8f5"/>
+        <rect x="0" y="89.5" width="120" height="3" fill="#c6eadf"/><rect x="0" y="95" width="120" height="2.2" fill="#f6f8f5"/>
+        <rect x="0" y="99.5" width="120" height="3" fill="#c6eadf"/>
+      </g>
+      <path d="M36 6 L48 3 L60 16 L72 3 L84 6 L112 24 L114 72 L96 74 L92 42 L92 106 L28 106 L28 42 L24 74 L6 72 L8 24 Z" fill="none" stroke="#23452f" stroke-width="1.2" stroke-linejoin="round"/>
+      <!-- V-neck -->
+      <path d="M48 3 L60 16 L72 3" fill="none" stroke="#c6eadf" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M50.5 4.5 L60 13.5 L69.5 4.5" fill="none" stroke="#2e5a3f" stroke-width="1"/>
+      <!-- slanted wave-filled B -->
+      <g transform="translate(60 57) skewX(-14)" font-family="Inter, system-ui, sans-serif" font-weight="900" font-size="56" text-anchor="middle">
+        <text x="3" y="21" fill="#1c2a4a">B</text>
+        <text x="0" y="18" fill="url(#fleetWaves)" stroke="#1c2a4a" stroke-width="2.4" paint-order="stroke">B</text>
+      </g>
+    </svg>`,
+  };
+  document.querySelectorAll('.badge').forEach(b => { b.innerHTML = BADGES[b.dataset.badge] || ''; });
+
+  // ---------------- Guides: a different traveler at each stop ----------------
+  // Stop I is the rower above. The rest are simple rigs drawn facing downstream (right), feet on y=112.
+  const ch0 = document.getElementById('ch0');
+  const figsG = document.getElementById('figs');
+  const GUIDES = [
+    null,
+    { name: 'Red Sox fan', gait: 'walk', skin: '#e3ae88', top: '#f4f1ea', trim: '#bd1e2d', arm: '#e3ae88', sleeve: '#f4f1ea', patch: 'socks',
+      legs: '#3c5378', shoe: '#f1f1f1', hat: 'cap', hatColor: '#1d2a44', hatMark: '#bd1e2d', prop: 'pennant' },
+    { name: 'Marathoner', gait: 'run', skin: '#8d5a3b', top: '#f2b134', arm: '#8d5a3b', legs: '#8d5a3b', shorts: '#1f4e9a',
+      shoe: '#ffffff', hat: 'band', hatColor: '#1f4e9a', prop: 'bib' },
+    { name: 'Celtics player', gait: 'dribble', skin: '#f2c9a8', hair: '#b4532a', freckles: true, top: '#f6f4ee', trim: '#1e7a3e', arm: '#f2c9a8', legs: '#f2c9a8',
+      shorts: '#f6f4ee', socks: '#f6f4ee', sockTrim: '#1e7a3e', shoe: '#1c1c1c', hat: 'crew', chest: 'shamrock', prop: 'ball' },
+    { name: 'Fleet player', gait: 'skate', skin: '#d9a07a', top: '#2e5a3f', trim: '#c6eadf', trim2: '#f6f8f5', yoke: '#c6eadf', arm: '#2e5a3f', legs: '#1e3a2c',
+      shoe: '#1b1b1b', hat: 'helmet', hatColor: '#2e5a3f', prop: 'stick', chest: 'fleetB', sleeveStripe: true },
+  ];
+  const darker = c => rgb(mixRGB(hex(c), [0, 0, 0], 0.32));
+  const mk = (tag, attrs, parent) => {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    parent.appendChild(e); return e;
+  };
+  const limb = (color, w, parent) => mk('path', { stroke: color, 'stroke-width': w, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', fill: 'none' }, parent);
+  function emblem(kind, parent) {
+    const g = mk('g', {}, parent);
+    if (kind === 'socks') {
+      mk('path', { d: 'M-3.3 -3.7 H-0.9 V0.5 H1.0 A1.1 1.1 0 0 1 1.0 2.7 H-1.9 A1.4 1.4 0 0 1 -3.3 1.3 Z M0.5 -4.5 H2.9 V-0.3 H4.8 A1.1 1.1 0 0 1 4.8 1.9 H1.9 A1.4 1.4 0 0 1 0.5 0.5 Z', fill: '#bd1e2d' }, g);
+    } else if (kind === 'shamrock') {
+      [[0, -1.7], [-1.6, 0.3], [1.6, 0.3]].forEach(([x, y]) => mk('circle', { cx: x, cy: y, r: 1.55, fill: '#1e7a3e' }, g));
+      mk('path', { d: 'M0 0.5 q0.4 2 1.4 3', stroke: '#1e7a3e', 'stroke-width': 0.8, fill: 'none' }, g);
+    } else if (kind === 'fleetB') {
+      const b = mk('g', { transform: 'skewX(-14)', 'font-family': 'Inter, system-ui, sans-serif', 'font-weight': 900, 'font-size': 8.5, 'text-anchor': 'middle' }, g);
+      mk('text', { x: 0.6, y: 3.6, fill: '#1c2a4a' }, b).textContent = 'B';
+      mk('text', { x: 0, y: 3, fill: '#c6eadf', stroke: '#1c2a4a', 'stroke-width': 0.5, 'paint-order': 'stroke' }, b).textContent = 'B';
+    }
+    return g;
+  }
+
+  function buildGuide(s) {
+    const g = mk('g', { opacity: 0 }, figsG);
+    const G = { s, g, el: {} }, el = G.el;
+    const legSet = (side, dim) => {
+      const c = x => dim ? darker(x) : x;
+      el['leg' + side] = limb(c(s.legs), 7, g);
+      if (s.shorts) el['shorts' + side] = limb(c(s.shorts), 9.5, g);
+      if (s.socks) el['socks' + side] = limb(c(s.socks), 7.6, g);
+      if (s.sockTrim) el['sockTrim' + side] = limb(c(s.sockTrim), 7.8, g);
+      [el['socks' + side], el['sockTrim' + side]].forEach(e => e && e.setAttribute('stroke-linecap', 'butt'));
+      el['shoe' + side] = limb(c(s.shoe), 5, g);
+      if (s.gait === 'skate') el['blade' + side] = limb(dim ? '#9aa4ab' : '#c9d1d6', 1.6, g);
+    };
+    legSet('Far', true);
+    el.armFar = limb(darker(s.arm), 5, g);
+    if (s.sleeve) el.sleeveFar = limb(darker(s.sleeve), 8, g);
+    legSet('Near', false);
+    el.torso = limb(s.top, s.gait === 'run' ? 11 : 13, g);
+
+    // Jersey details ride along the torso: trim/piping, chest emblem, race bib
+    el.trim = mk('g', {}, g);
+    if (s.prop === 'bib') {
+      mk('rect', { x: -4.5, y: -4, width: 9, height: 8, rx: 1, fill: '#fff' }, el.trim);
+      mk('path', { d: 'M-2.5 -1 h5 M-2.5 1.5 h3', stroke: '#1f2a30', 'stroke-width': 1 }, el.trim);
+    } else if (s.gait === 'walk') {
+      mk('rect', { x: 4.6, y: -15, width: 1.6, height: 30, fill: s.trim }, el.trim);                    // button piping
+    } else if (s.gait === 'dribble') {
+      mk('rect', { x: -6.5, y: -16.5, width: 13, height: 2.2, fill: s.trim }, el.trim);                 // tank-top neckline
+      mk('rect', { x: 4.8, y: -15, width: 1.6, height: 30, fill: s.trim }, el.trim);                    // side trim
+    } else if (s.gait === 'skate') {
+      mk('rect', { x: -6.5, y: -16.5, width: 13, height: 5, fill: s.yoke }, el.trim);                  // mint shoulder yoke
+      [[6.4, s.trim], [9.2, s.trim2], [11.6, s.trim], [14.2, s.trim2]].forEach(([y, c]) =>             // hem stripes
+        mk('rect', { x: -6.5, y, width: 13, height: 2, fill: c }, el.trim));
+    }
+    if (s.chest) { el.chest = mk('g', {}, g); emblem(s.chest, el.chest); }
+
+    el.head = mk('g', {}, g);
+    const H = el.head;
+    if (s.hat === 'helmet') limb('#2b1d14', 3.5, H).setAttribute('d', 'M-7 1 q-8 2 -10 10');          // ponytail
+    if (s.hat === 'band') mk('circle', { cx: -7.5, cy: -6, r: 4.5, fill: '#1b120c' }, H);                 // bun
+    mk('circle', { cx: 0, cy: 0, r: 8.5, fill: s.skin }, H);
+    mk('circle', { cx: 4.6, cy: -1, r: 1, fill: '#1f2a30' }, H);                                          // eye, facing downstream
+    if (s.freckles) [[3.2, 2.4], [5, 2.9], [6.6, 2.2], [4.2, 4]].forEach(([x, y]) => mk('circle', { cx: x, cy: y, r: 0.45, fill: '#b9714a' }, H));
+    if (s.hat === 'cap') {
+      mk('path', { d: 'M-8.8 -1 Q-8 -11 1 -11 Q9 -10 8.8 -2 Z', fill: s.hatColor }, H);
+      mk('path', { d: 'M6 -3.5 L16 -1.5 L7 0 Z', fill: s.hatColor }, H);
+      mk('text', { x: 3.4, y: -3.6, 'text-anchor': 'middle', 'font-size': 6.5, 'font-weight': 700, 'font-family': 'Georgia, serif', fill: s.hatMark }, H).textContent = 'B';
+    } else if (s.hat === 'band') {
+      mk('path', { d: 'M-8.6 -1 Q-8 -10 1 -9.8 Q8 -9 8.6 -3 Z', fill: '#1b120c' }, H);
+      limb(s.hatColor, 2.6, H).setAttribute('d', 'M-8.6 -3.5 L8.4 -5');
+    } else if (s.hat === 'crew') {
+      mk('path', { d: 'M-8.6 -0.5 Q-8.6 -10 1 -10 Q8 -9.6 8.6 -3.5 Q4 -6.8 -2 -6.2 Q-6 -5 -8.6 -0.5 Z', fill: s.hair || '#16100b' }, H);
+    } else if (s.hat === 'helmet') {
+      mk('path', { d: 'M-9.6 1 Q-10.4 -11.5 0 -11.8 Q9.6 -11.5 10 -2.5 L6.5 -2.5 L5.5 1.5 Z', fill: s.hatColor }, H);
+      limb('#e8e8e8', 1.4, H).setAttribute('d', 'M8.5 -2.5 L11 4.5');                                    // visor
+    }
+    if (s.prop === 'ball') {
+      el.ball = mk('g', {}, g);
+      mk('circle', { cx: 0, cy: 0, r: 6, fill: '#cf6d2a' }, el.ball);
+      mk('path', { d: 'M-6 0 H6 M0 -6 V6 M-4.2 -4.2 Q-1.5 0 -4.2 4.2 M4.2 -4.2 Q1.5 0 4.2 4.2', stroke: '#4a220c', 'stroke-width': 0.7, fill: 'none' }, el.ball);
+    }
+    el.armNear = limb(s.arm, 5.5, g);
+    if (s.sleeve) el.sleeveNear = limb(s.sleeve, 8, g);
+    if (s.yoke) el.yoke = limb(s.yoke, 6.2, g);
+    if (s.sleeveStripe) {
+      el.sleeveStripe = limb(s.trim, 6.2, g); el.sleeveStripe2 = limb(s.trim2, 6.2, g);
+      [el.yoke, el.sleeveStripe, el.sleeveStripe2].forEach(e => e && e.setAttribute('stroke-linecap', 'butt'));
+    }
+    if (s.patch) { el.patch = mk('g', {}, g); emblem(s.patch, el.patch); }
+    if (s.prop === 'pennant') {
+      el.pole = limb('#d9d2c3', 1.6, g);
+      el.flag = mk('path', { fill: '#bd1e2d' }, g);
+    } else if (s.prop === 'stick') {
+      el.stick = limb('#d6bf93', 2.6, g);
+      el.stickBlade = limb('#222', 3.2, g);
+    }
+    return G;
+  }
+  const guides = GUIDES.map(s => s && buildGuide(s));
+
+  const P2 = (x, y) => `${x.toFixed(1)} ${y.toFixed(1)}`;
+  const along = (o, len, ang) => [o[0] + len * Math.sin(ang), o[1] + len * Math.cos(ang)];   // ang from straight-down, + = forward
+  const lerpPt = (a, b, f) => [lerp(a[0], b[0], f), lerp(a[1], b[1], f)];
+  const seg = (a, b, f0, f1) => `M${P2(...lerpPt(a, b, f0))} L${P2(...lerpPt(a, b, f1))}`;
+  const GAITS = {
+    walk:    { A: 0.42, K: 0.55, lean: 0.04, arm: 0.45, elbow: 0.3 },
+    run:     { A: 0.72, K: 1.5,  lean: 0.2,  arm: 0.85, elbow: 1.55 },
+    dribble: { A: 0.5,  K: 0.9,  lean: 0.12, arm: 0.55, elbow: 0.9 },
+    skate:   { lean: 0.6 },
+  };
+  function poseGuide(G, ph, act, time) {
+    const s = G.s, el = G.el, gp = GAITS[s.gait];
+    const L1 = 21, L2 = 22, TL = s.gait === 'run' ? 30 : 32, U = 14, F = 13;
+    const hip0 = [116, 0];
+    const leg = p => {
+      let a, k;
+      if (s.gait === 'skate') {
+        const push = Math.max(0, Math.sin(p)) * act;          // one leg pushes back while the other glides
+        a = 0.5 - 1.25 * push; k = 1.05 - 0.85 * push;
+      } else {
+        a = gp.A * act * Math.sin(p); k = gp.K * act * Math.max(0, Math.cos(p)) + 0.12;
+      }
+      const kn = along(hip0, L1, a), ft = along(kn, L2, a - k);
+      return { kn, ft };
+    };
+    const near = leg(ph), far = leg(ph + Math.PI);
+    // Plant the lowest foot on the ground; runners get a little airtime
+    const ground = s.gait === 'skate' ? 107 : 109.5;
+    let dy = ground - Math.max(near.ft[1], far.ft[1]);
+    if (s.gait === 'run') dy -= 3.5 * act * Math.max(0, Math.sin(2 * ph));
+    const sh = p => [p[0], p[1] + dy];
+    const hip = sh(hip0);
+    [near, far].forEach(l => { l.kn = sh(l.kn); l.ft = sh(l.ft); });
+
+    const lean = gp.lean + (s.gait === 'skate' ? 0.06 * act * Math.sin(2 * ph) : 0);
+    const shoulder = [hip[0] + TL * Math.sin(lean), hip[1] - TL * Math.cos(lean)];
+    const headP = [hip[0] + (TL + 11) * Math.sin(lean), hip[1] - (TL + 11) * Math.cos(lean)];
+
+    [['Near', near], ['Far', far]].forEach(([side, l]) => {
+      el['leg' + side].setAttribute('d', `M${P2(...hip)} L${P2(...l.kn)} L${P2(...l.ft)}`);
+      if (el['shorts' + side]) el['shorts' + side].setAttribute('d', seg(hip, l.kn, 0, 0.55));
+      if (el['socks' + side]) el['socks' + side].setAttribute('d', seg(l.kn, l.ft, 0.42, 0.92));
+      if (el['sockTrim' + side]) el['sockTrim' + side].setAttribute('d', seg(l.kn, l.ft, 0.48, 0.56));
+      if (s.gait === 'skate') {
+        el['shoe' + side].setAttribute('d', `M${P2(l.ft[0] - 2, l.ft[1])} L${P2(l.ft[0] + 6, l.ft[1] + 1)}`);
+        el['blade' + side].setAttribute('d', `M${P2(l.ft[0] - 5, l.ft[1] + 4)} L${P2(l.ft[0] + 10, l.ft[1] + 4)}`);
+      } else {
+        el['shoe' + side].setAttribute('d', `M${P2(...l.ft)} l7 0.5`);
+      }
+    });
+    el.torso.setAttribute('d', `M${P2(...hip)} L${P2(...shoulder)}`);
+    const onTorso = f => P2(...lerpPt(hip, shoulder, f));
+    const leanDeg = (lean * 57.3).toFixed(1);
+    el.trim.setAttribute('transform', `translate(${onTorso(s.prop === 'bib' ? 0.55 : 0.5)}) rotate(${leanDeg})`);
+    if (el.chest) el.chest.setAttribute('transform', `translate(${onTorso(0.66)}) rotate(${leanDeg}) translate(1 0) scale(1.35)`);
+    el.head.setAttribute('transform', `translate(${P2(...headP)}) rotate(${(lean * 20).toFixed(1)})`);
+
+    // Arms
+    const arm = (b, e) => { const elb = along(shoulder, U, b); return { elb, hand: along(elb, F, e) }; };
+    let aN, aF;
+    if (s.gait === 'skate') {
+      aN = arm(0.75 + 0.08 * Math.sin(ph), 1.25);
+      aF = arm(0.55 - 0.08 * Math.sin(ph), 1.15);
+    } else if (s.prop === 'pennant') {
+      const wave = Math.sin(time * 5) * 0.12, sw = gp.arm * act * Math.sin(ph);
+      aF = arm(2.45 + wave, 2.75 + wave);                     // far arm up, waving the pennant
+      aN = arm(-sw, -sw + gp.elbow);                          // near arm swings, showing the sleeve patch
+    } else if (s.prop === 'ball') {
+      const h = Math.abs(Math.cos(ph * 1.5));                 // ball height: 1 = in hand, 0 = on the floor
+      aN = arm(0.55 + 0.25 * (1 - h), 1.0 + 0.3 * (1 - h));   // hand pushes down as the ball leaves it
+      aF = arm(gp.arm * act * Math.sin(ph), gp.arm * act * Math.sin(ph) + gp.elbow);
+      const r = 6, bx = aN.hand[0] + 3;
+      el.ball.setAttribute('transform', `translate(${P2(bx, lerp(112 - r, aN.hand[1] + r + 0.5, h))}) rotate(${(ph * 120 % 360).toFixed(0)})`);
+    } else {
+      const sw = gp.arm * act * Math.sin(ph);
+      aN = arm(-sw, -sw + gp.elbow); aF = arm(sw, sw + gp.elbow);
+    }
+    el.armNear.setAttribute('d', `M${P2(...shoulder)} L${P2(...aN.elb)} L${P2(...aN.hand)}`);
+    el.armFar.setAttribute('d', `M${P2(...shoulder)} L${P2(...aF.elb)} L${P2(...aF.hand)}`);
+    if (el.sleeveNear) el.sleeveNear.setAttribute('d', seg(shoulder, aN.elb, 0, 0.6));
+    if (el.sleeveFar) el.sleeveFar.setAttribute('d', seg(shoulder, aF.elb, 0, 0.6));
+    if (el.yoke) el.yoke.setAttribute('d', seg(shoulder, aN.elb, 0, 0.32));
+    if (el.sleeveStripe) {
+      el.sleeveStripe.setAttribute('d', seg(aN.elb, aN.hand, 0.2, 0.34));
+      el.sleeveStripe2.setAttribute('d', seg(aN.elb, aN.hand, 0.38, 0.5));
+    }
+    if (el.patch) el.patch.setAttribute('transform', `translate(${P2(...lerpPt(shoulder, aN.elb, 0.34))}) scale(1.05)`);
+
+    if (el.pole) {
+      const h = aF.hand, top = [h[0] + 2, h[1] - 22], flap = Math.sin(time * 7) * 2.5;
+      el.pole.setAttribute('d', `M${P2(h[0] - 1, h[1] + 3)} L${P2(...top)}`);
+      el.flag.setAttribute('d', `M${P2(...top)} L${P2(top[0] - 20, top[1] + 4 + flap)} L${P2(top[0], top[1] + 9)} Z`);
+    }
+    if (el.stick) {
+      const h = aN.hand, blade = [h[0] + 30, 108.5];
+      const dx = blade[0] - h[0], dyy = blade[1] - h[1], len = Math.hypot(dx, dyy);
+      el.stick.setAttribute('d', `M${P2(h[0] - dx / len * 9, h[1] - dyy / len * 9)} L${P2(...blade)}`);
+      el.stickBlade.setAttribute('d', `M${P2(...blade)} l11 0.5`);
+    }
+  }
+
+  // ---------------- Walkway under the guide: wharf / road / seawall, or ice ----------------
+  const scratches = Array.from({ length: 16 }, () => ({ u: rand(), v: rand(), c: rand() - 0.5 }));
+  const PLAT_PAR = 1 + (BOAT_BAND / (BANDS - 1)) * 1.6;      // moves with the water at the guide's depth
+  function drawPlatform(ctx, pal, worldX, time, top, dockW, iceW) {
+    if (dockW > 0.01) {
+      ctx.globalAlpha = dockW;
+      const sp = 120, off = mod(-worldX * PLAT_PAR, sp);
+      const pg = ctx.createLinearGradient(0, top + 12, 0, top + 60);
+      pg.addColorStop(0, rgb(pal.deckEdge)); pg.addColorStop(1, rgb(pal.deckEdge, 0));
+      ctx.fillStyle = pg;
+      for (let x = off - sp; x < W + sp; x += sp) ctx.fillRect(x, top + 12, 10, 48);
+      ctx.fillStyle = rgb(pal.deck); ctx.fillRect(0, top, W, 7);
+      ctx.fillStyle = rgb(pal.deckEdge); ctx.fillRect(0, top + 7, W, 7);
+      if (pal.seams > 0.05) {
+        ctx.strokeStyle = rgb(pal.deckEdge, pal.seams); ctx.lineWidth = 1;
+        const so = mod(-worldX * PLAT_PAR, 38);
+        ctx.beginPath();
+        for (let x = so - 38; x < W + 38; x += 38) { ctx.moveTo(x, top + 1); ctx.lineTo(x - 3, top + 7); }
+        ctx.stroke();
+      }
+      if (pal.stripeA > 0.05) {
+        ctx.fillStyle = rgb(pal.stripe, pal.stripeA); ctx.fillRect(0, top + 1.5, W, 1.8);
+        ctx.fillStyle = rgb(pal.stripe2, pal.stripeA); ctx.fillRect(0, top + 4, W, 1.8);
+      }
+    }
+    if (iceW > 0.01) {
+      ctx.globalAlpha = iceW;
+      const ig = ctx.createLinearGradient(0, top, 0, top + 56);
+      ig.addColorStop(0, '#f4fafd'); ig.addColorStop(0.18, '#dcebf3'); ig.addColorStop(1, '#a7c6d6');
+      ctx.fillStyle = ig;
+      ctx.beginPath(); ctx.moveTo(0, top); ctx.lineTo(W, top);
+      for (let x = W; x >= -24; x -= 24) {
+        const wx = x + worldX * PLAT_PAR;
+        ctx.lineTo(x, top + 50 + 4 * Math.sin(wx * 0.07) + 3 * Math.sin(wx * 0.023));
+      }
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 1;
+      for (const sc of scratches) {
+        const span = W * 1.5, x = mod(sc.u * span - worldX * PLAT_PAR, span) - W * 0.25;
+        const y = top + 6 + sc.v * 34, len = 40 + sc.v * 90;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + len / 2, y + sc.c * 8, x + len, y + sc.c * 3); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.fillRect(0, top, W, 1.5);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------------- Main loop ----------------
+  let tTarget = tFromScroll(), t = tTarget, tPrev = t, lastKey = '';
+  addEventListener('scroll', () => { tTarget = tFromScroll(); }, { passive: true });
+  addEventListener('resize', () => { tTarget = tFromScroll(); });
+
+  function eraAt(t) {
+    // Returns palette blend: [i, j, f]
+    for (let i = 0; i < stops.length; i++) {
+      if (t < stops[i].a) {
+        if (i === 0) return [0, 0, 0];
+        const a = stops[i - 1].b, b = stops[i].a;
+        return [i - 1, i, smooth(0, 1, (t - a) / (b - a))];
+      }
+      if (t <= stops[i].b) return [i, i, 0];
+    }
+    const n = stops.length - 1; return [n, n, 0];
+  }
+
+  function frame(ms) {
+    const time = (ms / 1000) * (reduceMotion ? 0.25 : 1);
+    t += (tTarget - t) * (reduceMotion ? 1 : 0.09);
+    if (Math.abs(tTarget - t) < 0.0004) t = tTarget;
+    const vel = t - tPrev; tPrev = t;
+    const worldX = t * 720;
+
+    // ---- Era colors
+    const [i, j, f] = eraAt(t);
+    const pal = {};
+    for (const k in P[i]) pal[k] = Array.isArray(P[i][k]) ? mixRGB(P[i][k], P[j][k], f) : lerp(P[i][k], P[j][k], f);
+    const key = t.toFixed(4);
+    if (key !== lastKey) {
+      lastKey = key;
+      root.style.setProperty('--sky-top', rgb(pal.skyTop));
+      root.style.setProperty('--sky-bot', rgb(pal.skyBot));
+      root.style.setProperty('--sun', rgb(pal.sun));
+      root.style.setProperty('--sun-frac', pal.sunFrac.toFixed(3));
+      root.style.setProperty('--land', rgb(pal.land));
+      root.style.setProperty('--land2', rgb(pal.land2));
+      root.style.setProperty('--ink', rgb(pal.ink));
+      root.style.setProperty('--mist', (pal.mist * (i === 0 && j === 0 ? 1 - smooth(stops[0].a + 1, stops[0].a + 3.5, t) * 0.6 : 1)).toFixed(3));
+      root.style.setProperty('--stars', pal.stars.toFixed(3));
+      boat.style.filter = `brightness(${pal.boat.toFixed(3)})`;
+
+      // ---- Scenes: crossfade by era, drift left as the boat passes
+      scenes.forEach((el, n) => {
+        const w = n === i ? 1 - f : n === j ? f : 0;
+        el.style.opacity = w.toFixed(3);
+        if (w > 0) {
+          const st = stops[n];
+          if (el.dataset.step) {
+            // Panorama: slide the shore so the current passage's landmark sits beside the story card
+            const k = (H * 0.34) / 260, u = clamp(t - st.a, 0, 6.5);
+            const focus = +el.dataset.x0 + u * +el.dataset.step;
+            const tx = clamp(W * (W < 720 ? 0.5 : 0.42) - focus * k, W - 3000 * k, 0);
+            el.style.transform = `translateX(${tx.toFixed(1)}px)`;
+          } else {
+            const mid = (st.a + st.b) / 2, half = (st.b - st.a) / 2 + 1;
+            el.style.transform = `translateX(${(-(t - mid) / half) * 10}vw)`;
+          }
+        }
+      });
+      animateStop1(t - stops[0].a);
+      for (const o of showEls) {
+        const u = t - stops[o.stop].a;
+        let v = smooth(o.a, o.b, u);
+        if (o.hide) v *= 1 - smooth(o.hide[0], o.hide[1], u);
+        o.el.setAttribute('opacity', v.toFixed(3));
+      }
+
+      // ---- Narration segments
+      for (const s of segs) {
+        const d = (t - s.c) / (s.w / 2);
+        let o = 1 - smooth(0.5, 1, Math.abs(d));
+        if (s.first && d < 0) o = 1;
+        if (s.last && d > 0) o = 1;
+        s.el.style.opacity = o.toFixed(3);
+        s.el.style.visibility = o > 0.01 ? 'visible' : 'hidden';
+        const shift = (s.first && d < 0) || (s.last && d > 0) ? 0 : -d * 18;
+        const centered = !s.el.classList.contains('beat') && !s.el.classList.contains('placeholder');
+        s.el.style.transform = `${centered ? 'translateX(-50%) ' : ''}translateY(${shift.toFixed(1)}px)`;
+      }
+
+      // ---- Nav
+      mapProgress.style.width = `${mapPos(t)}%`;
+      mapDots.forEach((b, n) => b.classList.toggle('on', t >= stops[n].a - 0.5));
+    }
+
+    // ---- Rowing: oars stroke while you scroll
+    const speed = clamp(Math.abs(vel) * 30);
+    activity = lerp(activity, speed > 0.02 ? 1 : 0, 0.05);
+    phase += (0.035 + speed * 0.14) * (reduceMotion ? 0.3 : 1);
+    const sp = Math.sin(phase);
+    const oarDeg = lerp(-6, 16 + 14 * sp, activity);
+    poseRower(oarDeg, lerp(-2, -16 * Math.cos(phase), activity));
+
+    // ---- Which guide is traveling: swap figures mid-transit
+    const wStop = stops.map((_, n) => (n === i && n === j) ? 1 : n === i ? 1 - f : n === j ? f : 0);
+    const figOpacity = n => (i === j) ? (n === i ? 1 : 0)
+      : n === i ? 1 - smooth(0.3, 0.55, f) : n === j ? smooth(0.45, 0.7, f) : 0;
+    // After the last stop, the rower and the boat come back for the open-water ending
+    const lastB = stops[stops.length - 1].b, back = smooth(lastB, lastB + 0.7, t);
+    ch0.setAttribute('opacity', Math.max(figOpacity(0), back).toFixed(3));
+    gphase += (0.03 + speed * 0.16) * (reduceMotion ? 0.3 : 1);
+    guides.forEach((G, n) => {
+      if (!G) return;
+      const o = figOpacity(n) * (1 - back);
+      G.g.setAttribute('opacity', o.toFixed(3));
+      if (o > 0) poseGuide(G, gphase * (G.s.gait === 'run' ? 1.25 : G.s.gait === 'skate' ? 0.6 : 0.9), activity, time);
+    });
+    const boatW = Math.max(wStop[0], back), iceW = (wStop[4] || 0) * (1 - back), dockW = Math.max(0, 1 - boatW - iceW);
+
+    // ---- Traveler position: the boat bobs on the wave; walkers stand on the walkway
+    const bw = boat.offsetWidth, bh = bw * (140 / 240);
+    const bx = W * (W < 720 ? 0.5 : 0.3) + Math.sin(time * 0.25) * 8 * boatW;
+    const by = waveY(BOAT_BAND, bx, worldX, time);
+    const platTop = base + bandDepth(BOAT_BAND) - 14;
+    const slope = (waveY(BOAT_BAND, bx + 40, worldX, time) - waveY(BOAT_BAND, bx - 40, worldX, time)) / 80;
+    const tilt = (Math.atan(slope) * 57.3 * 0.7 + Math.sin(time * 1.3) * 0.6) * boatW;
+    const ay = lerp(platTop, by, boatW);
+    boat.style.transform = `translate(${(bx - bw / 2).toFixed(1)}px, ${(ay - bh * 0.8).toFixed(1)}px) rotate(${tilt.toFixed(2)}deg)`;
+
+    // Ripple when the blade catches the water
+    if (boatW > 0.5 && activity > 0.5 && lastSin < 0 && sp >= 0) {
+      ripples.push({ wx: bx + bw * 0.38 + worldX * 1.6, y: by + 6, age: 0 });
+    }
+    lastSin = sp;
+
+    // ---- Paint water
+    const sunX = W * 0.72;
+    bctx.clearRect(0, 0, W, H); fctx.clearRect(0, 0, W, H);
+    for (let b = 0; b < BOAT_BAND; b++) drawBand(bctx, b, pal, worldX, time);
+    drawGlints(bctx, pal, worldX, time, 0, (BOAT_BAND - 0.4) / (BANDS - 1), sunX);
+    for (let b = BOAT_BAND; b < BANDS; b++) drawBand(fctx, b, pal, worldX, time);
+    drawGlints(fctx, pal, worldX, time, (BOAT_BAND - 0.4) / (BANDS - 1), 1.01, sunX);
+    drawPlatform(fctx, pal, worldX, time, platTop, dockW, iceW);
+
+    // Wake trailing behind the boat (to the left)
+    const wake = clamp(activity * 0.9 + speed) * boatW;
+    if (wake > 0.02) {
+      fctx.strokeStyle = rgb(pal.glint, 0.35 * wake); fctx.lineWidth = 1.5;
+      for (let k = 0; k < 3; k++) {
+        fctx.beginPath();
+        const sx = bx - bw * 0.42, len = 90 + k * 60;
+        fctx.moveTo(sx, by + 4 + k * 2);
+        fctx.quadraticCurveTo(sx - len * 0.5, by + 6 + k * 6, sx - len, by + 12 + k * 12);
+        fctx.stroke();
+      }
+    }
+    // Oar ripples
+    for (let r = ripples.length - 1; r >= 0; r--) {
+      const rp = ripples[r]; rp.age += 1 / 60;
+      if (rp.age > 2.2) { ripples.splice(r, 1); continue; }
+      const x = rp.wx - worldX * 1.6, rad = 6 + rp.age * 40;
+      fctx.strokeStyle = rgb(pal.glint, 0.5 * (1 - rp.age / 2.2)); fctx.lineWidth = 1.4;
+      fctx.beginPath(); fctx.ellipse(x, rp.y, rad, rad * 0.22, 0, 0, Math.PI * 2); fctx.stroke();
+    }
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
